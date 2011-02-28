@@ -15,38 +15,38 @@ QUICKSTART
 
   Nothing needs to be installed. Mybox can be run in user mode. The only program that needs elevated privelages is ServerAdmin since it manages local POSIX accounts.
 
-	Set up executables
-		> git clone https://mybox@github.com/mybox/mybox.git
-		> wget https://github.com/downloads/mybox/mybox/mybox-dev-includes-0.1.0.tar.gz
-		> mkdir mybox/inc && tar -xzf mybox-dev-includes-0.1.0.tar.gz -C mybox/inc
-		> cd mybox
-		> ant jar
-		
-		Copy the Mybox home application directory to the client and server machines
-		
+  Set up executables
+    > git clone https://mybox@github.com/mybox/mybox.git
+    > wget https://github.com/downloads/mybox/mybox/mybox-dev-includes-0.1.0.tar.gz
+    > mkdir mybox/inc && tar -xzf mybox-dev-includes-0.1.0.tar.gz -C mybox/inc
+    > cd mybox
+    > ant jar
+    
+    Copy the Mybox home application directory to the client and server machines
+    
 
   On the Server machine
   
     Configure the server
-    	> bash mybox.bash ServerSetup
-    	
+      > bash mybox.bash ServerSetup
+        
     Set up the user database
-    	> mv mybox_server_db.empty.xml mybox_server_db.xml
+      > mv mybox_server_db.empty.xml mybox_server_db.xml
 
     Create a user
-    	> bash mybox.bash ServerAdmin
-    	
-    	When it asks enter information to create a new user
+      > bash mybox.bash ServerAdmin
+      
+      When it asks enter information to create a new user
       
     Start the Server process:
       > bash mybox.bash Server
       
   On the Client machine
-  		
+
     Run the setup program to configure the client:
       > bash mybox.bash ClientSetup
 
-			Enter the credentials for the user you created on the server
+      Enter the credentials for the user you created on the server
     
     Run the client:
       > bash mybox.bash Client
