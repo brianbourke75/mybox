@@ -8,7 +8,7 @@ Introduction
 ------------
 Mybox is a centralized file hosting and synchronization system. The goal is for it to be an open source version of Dropbox. The software consist of a server and client component. One remote server can host multiple accounts and each account can be used on multiple computers, where all files will be automatically kept in sync across those computers.
 
-See the [wiki](https://github.com/mybox/mybox/wiki) for more details on [usage](https://github.com/mybox/mybox/wiki/Usage), [development](https://github.com/mybox/mybox/wiki/Development) and [the motivation](https://github.com/mybox/mybox/Project-Goals) behind this project.
+See the [wiki](https://github.com/mybox/mybox/wiki) for more details on [usage](https://github.com/mybox/mybox/wiki/Usage), [development](https://github.com/mybox/mybox/wiki/Development) and [the motivation](https://github.com/mybox/mybox/wiki/Project-Goals) behind this project.
 
 
 Project Status
@@ -23,8 +23,8 @@ Nothing needs to be installed. Mybox can be run in user mode. The only program t
 
 ### Set up executables ###
 
-      $ git clone https://mybox@github.com/mybox/mybox.git  
-      $ wget https://github.com/downloads/mybox/mybox/mybox-dev-includes-0.1.0.tar.gz  
+      $ git clone git://github.com/mybox/mybox.git
+      $ wget --no-check-certificate https://github.com/downloads/mybox/mybox/mybox-dev-includes-0.1.0.tar.gz  
       $ mkdir mybox/inc && tar -xzf mybox-dev-includes-0.1.0.tar.gz -C mybox/inc
       $ cd mybox
       $ ant jar
