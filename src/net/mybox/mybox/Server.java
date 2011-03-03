@@ -204,6 +204,7 @@ public class Server {
 //        String password = (String)attachInput.get("password");
 
         JSONObject jsonOut = new JSONObject();
+        jsonOut.put("serverMyboxVersion", Common.appVersion);
         
         if (thisClient.attachAccount(email)) {
           jsonOut.put("status", "success");

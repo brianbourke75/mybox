@@ -88,7 +88,7 @@ public class ClientGUI extends java.awt.Frame {
 
   public static void printErrorExit(String message) {
 
-	  System.err.println("clientawt error: " + message);// temp hack
+    System.err.println("clientawt error: " + message);// temp hack
 
     // TODO: fix this so the dialog pops up
     Dialog dialog = new Dialog((ClientGUI)client.clientGui, message);
@@ -109,7 +109,7 @@ public class ClientGUI extends java.awt.Frame {
       trayIcon.setImage(icon_ready);
       
       if (!pauseItem.isEnabled())
-    	  pauseItem.setEnabled(true);
+        pauseItem.setEnabled(true);
       
       if (!syncnowItem.isEnabled())
         syncnowItem.setEnabled(true);
@@ -129,20 +129,19 @@ public class ClientGUI extends java.awt.Frame {
         syncnowItem.setEnabled(false);
     }
     else {//DISCONNECTED
-    	trayIcon.setImage(icon_disconnected);
+      trayIcon.setImage(icon_disconnected);
 
       valueUser.setText("");
       valueServer.setText("");
       valuePort.setText("");
 
       if (pauseItem.isEnabled())
-      	pauseItem.setEnabled(false);
+        pauseItem.setEnabled(false);
 
       if (syncnowItem.isEnabled())
         syncnowItem.setEnabled(false);
 
       connectionItem.setLabel("Connect");
-    	
     }
   }
 
@@ -433,7 +432,7 @@ public class ClientGUI extends java.awt.Frame {
     * @param args the command line arguments
     */
     public static void main(String args[]) {
-    	
+
       Options options = new Options();
       options.addOption("c", "config", true, "configuration file");
       options.addOption("a", "apphome", true, "application home directory");

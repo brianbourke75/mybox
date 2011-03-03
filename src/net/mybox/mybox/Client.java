@@ -63,7 +63,7 @@ public class Client {
   // static system specific settings
   private final String ServerDir = "Mybox";
   public static final String defaultClientDir = System.getProperty("user.home") + "/Mybox";
-  public static final String defaultConfigFile = System.getProperty("user.home") + "/mybox_client.conf";
+  public static final String defaultConfigFile = System.getProperty("user.home") + "/.mybox_client.conf";
 
   public String serverUnisonCommand = null;
   public static String clientUnisonCommand;
@@ -82,23 +82,20 @@ public class Client {
 
     String osName = System.getProperty("os.name").toLowerCase();
 
-		if (osName.equals("linux")){
+    if (osName.equals("linux")) {
       clientUnisonCommand = incPath + "/unison-2.27.57-linux";
       sshCommand = incPath + "/ssh-ident.bash";
-		}
-		else if (osName.startsWith("windows")){
+    } else if (osName.startsWith("windows")) {
       clientUnisonCommand = incPath + "/unison-2.27.57-win_gui.exe";
 //      sshCommand = "inc" + "\\ssh-ident.bat";
       sshCommand = incPath + System.getProperty("file.separator") + "ssh-ident.bat";
-        // TODO: make this path absolute. might be a unison argument parsing bug
-		}
-    else if (osName.startsWith("mac os x")){
+      // TODO: make this path absolute. might be a unison argument parsing bug
+    } else if (osName.startsWith("mac os x")) {
       clientUnisonCommand = incPath + "/unison-2.40.61-macXX";
       sshCommand = incPath + "/ssh-ident.bash";
-		}
-    else {
-			throw new RuntimeException("Unsupported operating system: " + osName);
-		}
+    } else {
+      throw new RuntimeException("Unsupported operating system: " + osName);
+    }
 
   }
 
@@ -298,6 +295,10 @@ public class Client {
         account.salt= (String)map.get("salt");
         serverUnisonCommand = (String)map.get("serverUnisonCommand");
         printMessage("Set POSIXaccount to " + account.serverPOSIXaccount);
+
+        // inline check of mybox versions
+        if (!Common.appVersion.equals((String)map.get("serverMyboxVersion")))
+          printErrorExit("Client and Server Mybox versions do not match");
       }
 
     } else if (msg.equals("sync")) {
@@ -443,19 +444,21 @@ public class Client {
 
     if (!serverDiscussion("attachaccount " + jsonOut) || account.serverPOSIXaccount == null)
       printErrorExit("Unable to determine ssh account");
-    
+
+    // checking that the mybox versions are the same happens in handleMessageFromServer
+
     // check that the unison versions are the same. this also makes sure that the SSH keys work and that unison is installed
 
     SysResult runLocalUnisonChech = Common.syscommand(new String[]{Client.clientUnisonCommand, "-version"});
     if (runLocalUnisonChech.returnCode != 0)
-        printErrorExit("Unable to determine local unison version");
+      printErrorExit("Unable to determine local unison version");
 
     SysResult runServerUnisonCheck = Common.syscommand(new String[]{sshCommand, account.serverPOSIXaccount +
             "@" + account.serverName, serverUnisonCommand, "-version"});
     //sshCommand + " " + SSHuser + "@" + ServerName
     //        + " " + serverUnisonCommand + " -version");
     if (runServerUnisonCheck.returnCode != 0)
-        printErrorExit("Unable to contact server to detect unison version");
+      printErrorExit("Unable to contact server to detect unison version");
 
     if (!runServerUnisonCheck.output.equalsIgnoreCase(runLocalUnisonChech.output)) {
       printErrorExit("The server and client are running different versions of unison");
@@ -527,7 +530,7 @@ public class Client {
    * Constructor
    */
   public Client() {
-	  setStatus(ClientStatus.DISCONNECTED);
+    setStatus(ClientStatus.DISCONNECTED);
   }
 
   public void config(String configFile) {

@@ -1,6 +1,6 @@
 Mybox
 =====
-[https://github.com/mybox/mybox](https://github.com/mybox/mybox)
+[https://github.com/mybox/mybox](https://github.com/mybox/mybox)  
 version 0.1.0 by Jono
 
 
@@ -8,7 +8,7 @@ Introduction
 ------------
 Mybox is a centralized file hosting and synchronization system. The goal is for it to be an open source version of Dropbox. The software consist of a server and client component. One remote server can host multiple accounts and each account can be used on multiple computers, where all files will be automatically kept in sync across those computers.
 
-For more details on usage and development please see the [wiki](https://github.com/mybox/mybox/wiki).
+See the [wiki](https://github.com/mybox/mybox/wiki) for more details on [usage](https://github.com/mybox/mybox/wiki/Usage), [development](https://github.com/mybox/mybox/wiki/Development) and [the motivation](https://github.com/mybox/mybox/Project-Goals) behind this project.
 
 
 Project Status

@@ -135,6 +135,30 @@ public class ServerAdmin {
       
     }
   }
+  
+  
+  /**
+   * Delete POSIX account and update user database
+   */
+  private void showEncryptedPassword(){
+
+    BufferedReader br = new BufferedReader(new InputStreamReader(System.in));
+
+    String inputPassword = null, inputSalt = null, encryptedPassword = null;
+
+    Server.printMessage_("Enter a password to encrypt> ");
+    try { inputPassword = br.readLine(); } catch (Exception e) {}
+    
+    Server.printMessage_("Enter salt> ");
+    try { inputSalt = br.readLine(); } catch (Exception e) {}
+    
+    try {
+      encryptedPassword = Common.encryptPassword(inputPassword, inputSalt);
+    } catch (Exception e) {}
+
+    Server.printMessage("Encrypted password: " + encryptedPassword);
+
+  }
 
   /**
    * Constructor. Main loop and menu items.
@@ -154,7 +178,7 @@ public class ServerAdmin {
     // menu
     while (choice != 'q') {
       Server.printMessage("  l) List accounts");
-//      Server.printMessage("  c) Check POSIX accounts");
+      //Server.printMessage("  p) Show encyrpted password");
       Server.printMessage("  a) Add account");
       Server.printMessage("  d) Delete account");
       Server.printMessage("  q) Quit");
@@ -181,7 +205,9 @@ public class ServerAdmin {
         case 'a':
           addAccount();
           break;
-
+        case 'p':
+          showEncryptedPassword();
+          break;
       }
     }
 
