@@ -23,6 +23,9 @@ package net.mybox.mybox;
 
 import net.contentobjects.jnotify.*;
 
+/**
+ * Directory update listener made possible from J/inotify
+ */
 public class DirectoryListener {
 
   public static final int FILE_CREATED = 0x1;

@@ -64,6 +64,7 @@ public class Client {
   private final String ServerDir = "Mybox";
   public static final String defaultClientDir = System.getProperty("user.home") + "/Mybox";
   public static final String defaultConfigFile = System.getProperty("user.home") + "/.mybox_client.conf";
+  public static final String logFile = "/tmp/mybox_client.log";
 
   public String serverUnisonCommand = null;
   public static String clientUnisonCommand;
@@ -119,7 +120,26 @@ public class Client {
 
 
   // helpers
+
+
+  private static void log(String message) {
+    // TODO: change this to be a static PrintWriter opened at construction time
+    PrintWriter out = null;
+
+    try {
+      out = new PrintWriter(new FileWriter(logFile, true));
+    } catch (Exception e) {
+      System.out.println("Unable to open log file: " + e);
+    }
+
+    out.println(message);
+
+    out.close();
+  }
+
   public static void printErrorExit(String message) {
+
+    log(message);
     if (clientGui == null) {
       System.out.println(message);
       System.exit(1);
@@ -129,6 +149,7 @@ public class Client {
   }
 
   public static void printMessage_(String message) {
+    log(message);
     if (clientGui == null)
       System.out.print(message);
     else if (clientGui instanceof ClientGUI)
@@ -136,6 +157,7 @@ public class Client {
   }
 
   public static void printMessage(String message) {
+    log(message);
     if (clientGui == null)
       System.out.println(message);
     else if (clientGui instanceof ClientGUI)
@@ -143,6 +165,7 @@ public class Client {
   }
 
   public static void printWarning(String message) {
+    log(message);
     System.out.println(message);
   }
 

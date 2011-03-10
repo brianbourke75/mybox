@@ -39,7 +39,8 @@ public class ClientGUI extends java.awt.Frame {
   private static Image icon_ready = createImage("box_green.png", "icon");
   private static Image icon_error = createImage("box_red.png", "icon");
   private static Image icon_disconnected = createImage("box_blank.png", "icon");
-  
+
+  private static boolean debugMode = false;
 
   static MenuItem pauseItem = new MenuItem("Pause Syncing");
   static MenuItem syncnowItem = new MenuItem("Sync Now");
@@ -73,9 +74,13 @@ public class ClientGUI extends java.awt.Frame {
     client.config(configFile);
     client.clientGui = this;
 
-//    client.start();
 
     placeTrayIconAWT();
+
+    if (!debugMode)
+      client.start();
+
+    this.setVisible(debugMode);
   }
 
   public void printMessage(String message) {
@@ -436,6 +441,7 @@ public class ClientGUI extends java.awt.Frame {
       Options options = new Options();
       options.addOption("c", "config", true, "configuration file");
       options.addOption("a", "apphome", true, "application home directory");
+      options.addOption("d", "debug", false, "enable debug mode");
       options.addOption("h", "help", false, "show help screen");
       options.addOption("V", "version", false, "print the Mybox version");
 
@@ -461,6 +467,10 @@ public class ClientGUI extends java.awt.Frame {
       if (cmd.hasOption("V")) {
         Client.printMessage("version " + Common.appVersion);
         return;
+      }
+
+      if (cmd.hasOption("d")) {
+        debugMode = true;
       }
 
       if (cmd.hasOption("a")) {
@@ -491,7 +501,7 @@ public class ClientGUI extends java.awt.Frame {
         
       java.awt.EventQueue.invokeLater(new Runnable() {
         public void run() {
-          new ClientGUI(configFile).setVisible(true);
+          new ClientGUI(configFile);
         }
       });
     }
