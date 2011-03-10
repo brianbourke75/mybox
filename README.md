@@ -65,6 +65,6 @@ You should now have a ~/Mybox directory which is your synchronized directory.
 
 If you want the GUI to launch when you start a desktop session, add the following to your session startup script
 
-      cd path/to/myboxapp && bash mybox.bash ClientGUI
+      bash path/to/myboxapp/mybox.bash ClientGUI
       
 
