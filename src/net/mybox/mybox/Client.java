@@ -49,6 +49,9 @@ public class Client {
   
   // object state
   private Socket serverConnectionSocket = null;
+  private JFSClientThread jfsClientThread = null;
+
+  private Socket jfsServerConnectionSocket = null;
   private DataOutputStream streamToServer = null;
   private ClientServerReceiver client = null; // server listener thread
   private DirectoryListener dirListener = null;
@@ -450,6 +453,9 @@ public class Client {
       try {
         serverConnectionSocket = new Socket(account.serverName, account.serverPort);
         streamToServer = new DataOutputStream(serverConnectionSocket.getOutputStream());
+
+        jfsServerConnectionSocket = new Socket(account.serverName, 55202);
+
         break; // reachable if there is no exception thrown
       } catch (IOException ioe) {
         printMessage("There was an error reaching server. Will try again in " + pollInterval + " seconds...");
@@ -460,6 +466,8 @@ public class Client {
     printMessage("Connected: " + serverConnectionSocket);
     
     client = new ClientServerReceiver(this, serverConnectionSocket);
+
+    jfsClientThread = new JFSClientThread(this, jfsServerConnectionSocket);
 
     JSONObject jsonOut = new JSONObject();
     jsonOut.put("email", account.email);

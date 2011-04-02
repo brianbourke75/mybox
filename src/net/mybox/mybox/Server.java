@@ -30,6 +30,8 @@ import org.json.simple.*;
 import org.apache.commons.cli.*;
 import org.apache.commons.lang.*;
 
+import jfs.server.*;
+
 /**
  * The server component of the system is an executable that clients talk to
  */
@@ -37,8 +39,15 @@ public class Server {
 
   // list of connected clients
   private HashMap<Integer, ServerClientConnection> clients = new HashMap<Integer, ServerClientConnection>();
-  
+
   private ServerSocket server = null;
+
+
+//  private HashMap<Integer, ServerClientConnection> jfsClients = new HashMap<Integer, ServerClientConnection>();
+  //private ServerSocket jfsServerSocket = null;
+  private JFSServerThread jfsServerThread = null;
+
+
   public static int maxClients = 20;  // defaults
   public static int defaultQuota = 50;  // megabytes
   public static int port = Common.defaultCommunicationPort;
@@ -140,7 +149,10 @@ public class Server {
     try {
       printMessage("Binding to port " + port + ", please wait  ...");
       server = new ServerSocket(port);
+      jfsServerThread = new JFSServerThread();
+
       printMessage("Server started: " + server);
+
 
       while (true) {
         try {
