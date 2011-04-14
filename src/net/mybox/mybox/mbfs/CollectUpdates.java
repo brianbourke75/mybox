@@ -114,20 +114,20 @@ public class CollectUpdates {
     HashMap<String, MyFile> C = new HashMap<String, MyFile>();
     HashMap<String, MyFile> S = new HashMap<String, MyFile>();
 
-    C.put("e", new MyFile("e", 1, "file", 1));
-    C.put("a", new MyFile("a", 10, "file", 1));
-    C.put("b", new MyFile("b", 10, "file", 1));
-    C.put("c", new MyFile("c", 10, "file", 1));
-    C.put("g", new MyFile("g", 10, "file", 1));
+    C.put("e", new MyFile("e", 1, "file"));
+    C.put("a", new MyFile("a", 10, "file"));
+    C.put("b", new MyFile("b", 10, "file"));
+    C.put("c", new MyFile("c", 10, "file"));
+    C.put("g", new MyFile("g", 10, "file"));
 //    C.put("adir", new MyFile("adir", 10, "dir", 1));
 //    C.put("adir/1", new MyFile("adir/1", 10, "file", 1));
 //    C.put("bdir", new MyFile("bdir", 10, "dir", 1));
 
-    S.put("a", new MyFile("a", 10, "file", 1));
-    S.put("b", new MyFile("b", 11, "file", 1));
-    S.put("c", new MyFile("c", 9, "file", 1));
-    S.put("d", new MyFile("d", 9, "file", 1));
-    S.put("f", new MyFile("f", 6, "file", 1));
+    S.put("a", new MyFile("a", 10, "file"));
+    S.put("b", new MyFile("b", 11, "file"));
+    S.put("c", new MyFile("c", 9, "file"));
+    S.put("d", new MyFile("d", 9, "file"));
+    S.put("f", new MyFile("f", 6, "file"));
 
     int _lastSync = 8;
 

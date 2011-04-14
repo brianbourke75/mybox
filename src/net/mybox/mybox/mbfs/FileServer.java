@@ -3,6 +3,7 @@ package net.mybox.mybox.mbfs;
 import java.io.*;
 import java.net.*;
 import java.util.*;
+import org.json.simple.*;
 
 public class FileServer {
 
@@ -26,7 +27,7 @@ public class FileServer {
 
     if (operation.equals("c2s")) {
       try {
-        String fileName = ByteStream.toString(inStream) + "-copy";
+        String fileName = ByteStream.toString(inStream);// + "-copy";
         System.out.println("getting file: " + fileName);
         File file=new File(dir + "/" + fileName);
         ByteStream.toFile(inStream, file);
@@ -40,7 +41,7 @@ public class FileServer {
         System.out.println("client requesting from server: " + fileName);
         File file = new File(dir + "/" + fileName);
         if (file.exists()) {
-          outQueue.push(new MyFile(fileName, 10, "file", 123, "s2c"));
+          outQueue.push(new MyFile(fileName, 10, "file", "s2c"));
           checkQueue();
         }
       } catch (Exception e) {
@@ -52,11 +53,34 @@ public class FileServer {
 
   }
 
+
   private void sendServerFileList() {
     System.out.println("sending file list");
 
     try {
-      dataOutStream.writeUTF("requestServerFileList_response");
+
+      // get the local file list
+
+      File thisDir = new File(dir);
+
+      File[] files = thisDir.listFiles(); // TODO: use some FilenameFilter
+
+      JSONArray jsonArray = new JSONArray();
+      
+      for (File thisFile : files) {
+        MyFile myFile = new MyFile(thisFile.getName());
+        myFile.modtime = thisFile.lastModified();
+        
+        if (thisFile.isFile())
+          myFile.type = "file";
+        else if (thisFile.isDirectory())
+          myFile.type = "directory";
+
+        jsonArray.add(myFile.serialize());
+      }
+
+      dataOutStream.writeUTF("requestServerFileList_response"); // should I only send this when done?
+      ByteStream.toStream(outStream, jsonArray.toJSONString());
 
       // TODO: finish this part
     } catch (Exception e) {

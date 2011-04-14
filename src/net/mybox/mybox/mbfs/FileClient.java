@@ -3,7 +3,8 @@ package net.mybox.mybox.mbfs;
 import java.io.*;
 import java.net.Socket;
 import java.util.*;
-
+import org.json.simple.*;
+import org.json.simple.parser.*;
 
 public class FileClient {
 
@@ -19,18 +20,19 @@ public class FileClient {
 
   public LinkedList<MyFile> outQueue = new LinkedList<MyFile>();
   
-  public HashMap<String, MyFile> serverFileList = new HashMap<String, MyFile>();
-
+  public HashMap<String, MyFile> serverFileList = new HashMap<String, MyFile>();  // should nullify when done since global
+  public HashMap<String, MyFile> clientFileList = new HashMap<String, MyFile>();
+  
   private String receivedResponseCommand = null;
   
   private synchronized void handleInput(String operation) {
 
-    receivedResponseCommand = operation;
+    //receivedResponseCommand = operation;
     System.out.println("input operation: " + operation);
 
     if (operation.equals("s2c")) {
       try {
-        String file_name = ByteStream.toString(inStream) + "-copy";
+        String file_name = ByteStream.toString(inStream);// + "-copy";
         System.out.println("getting file: " + file_name);
         File file=new File(dir + "/" + file_name);
         ByteStream.toFile(inStream, file);
@@ -38,11 +40,53 @@ public class FileClient {
       catch (Exception e){
         System.out.println("Operation failed: " + e.getMessage());
       }
-    } else if (operation.equals("requestServerFileList_respose")) {
-      ;
-      // receive giant serialized string blob and save to local hash table
+    } else if (operation.equals("requestServerFileList_response")) {
+
+      try {
+        String jsonString = ByteStream.toString(inStream);
+        serverFileList = decodeFileList(jsonString);
+        System.out.println("Recieved jsonarray: " + jsonString);
+      } catch (Exception e) {
+        System.out.println("Exception while recieving jsonArray");
+      }
     }
 
+    receivedResponseCommand = operation;  // set this at the end so it is known that it finished
+  }
+
+
+  public static HashMap<String, MyFile> decodeFileList(String input) {
+
+    HashMap<String, MyFile> result = new HashMap<String, MyFile>();
+
+    JSONParser parser = new JSONParser();
+    ContainerFactory containerFactory = new ContainerFactory(){
+      @Override
+      public List creatArrayContainer() {
+        return new LinkedList();
+      }
+      @Override
+      public Map createObjectContainer() {
+        return new LinkedHashMap();
+      }
+    };
+
+    try {
+      List thisList = (List)parser.parse(input, containerFactory);
+
+      Iterator iter = thisList.iterator();
+      while(iter.hasNext()){
+        String serialized = (String)iter.next();
+        MyFile myFile = MyFile.fromSerial(serialized);
+//        System.out.println("Saving to hash: " + myFile);
+        result.put(myFile.name, myFile);
+      }
+    }
+    catch(Exception pe){
+      System.out.println(pe);
+    }
+
+    return result;
   }
 
   public synchronized void checkQueue() {
@@ -98,6 +142,37 @@ public class FileClient {
     receivedResponseCommand = null;
 
     return false;
+  }
+  
+  
+  private void populateLocalFileList() {
+    System.out.println("getting local file list");
+
+    try {
+
+      // get the local file list
+
+      File thisDir = new File(dir);
+
+      File[] files = thisDir.listFiles(); // TODO: use some FilenameFilter
+
+      JSONArray jsonArray = new JSONArray();
+      
+      for (File thisFile : files) {
+        MyFile myFile = new MyFile(thisFile.getName());
+        myFile.modtime = thisFile.lastModified();
+        
+        if (thisFile.isFile())
+          myFile.type = "file";
+        else if (thisFile.isDirectory())
+          myFile.type = "directory";
+
+        clientFileList.put(myFile.name, myFile);
+      }
+
+    } catch (Exception e) {
+      System.out.println("Error populating local file list");
+    }
   }
 
   private void sendFile(MyFile myFile) {
@@ -156,6 +231,24 @@ public class FileClient {
 //    checkQueue();
     
   }
+
+  public void twoWayMergeTest() {
+    // assumes client and server file lists are populated
+
+    for (String fname : serverFileList.keySet()) {
+      MyFile myFile = serverFileList.get(fname);
+      myFile.action = "clientWants";
+      outQueue.push(myFile);
+    }
+
+    for (String fname : clientFileList.keySet()) {
+      MyFile myFile = clientFileList.get(fname);
+      myFile.action = "c2s";
+      outQueue.push(myFile);
+    }
+
+    // TODO: invalidate client and server lists here?
+  }
   
   public static void main(String[] args) {
     
@@ -163,14 +256,22 @@ public class FileClient {
 
     // full sync test
 
-    fileClient.outQueue.push(new MyFile("clientfile1", 10, "file", 123, "c2s"));
-    fileClient.outQueue.push(new MyFile("clientfile2", 10, "file", 123, "c2s"));
+    // get client (local) file list
+    fileClient.populateLocalFileList();
+    
+//    fileClient.outQueue.push(new MyFile("clientfile1", 10, "file", "c2s"));
+//    fileClient.outQueue.push(new MyFile("clientfile2", 10, "file", "c2s"));
 
+    // get server file list
     boolean listReturned = fileClient.blockingDiscussion("requestServerFileList");
 
-    // get remote file list
-    fileClient.outQueue.push(new MyFile("serverfile1", 10, "file", 123, "clientWants"));
-    fileClient.outQueue.push(new MyFile("serverfile2", 10, "file", 123, "clientWants"));
+//    fileClient.outQueue.push(new MyFile("serverfile1", 10, "file", "clientWants"));
+//    fileClient.outQueue.push(new MyFile("serverfile2", 10, "file", "clientWants"));
+
+    // call CollectUpdates to label the actions accordingly
+
+    // hack until CollectUpdates is ready
+    fileClient.twoWayMergeTest();
     
     fileClient.checkQueue();
 

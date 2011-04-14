@@ -220,7 +220,7 @@ public class Common {
    */
   public static HashMap jsonDecode(String input) {
 
-    // TODO: make this recursive for nested JSON arrays
+    // TODO: make this recursive for nested JSON objects and perhaps arrays as well
 
     HashMap result = new HashMap();
 
@@ -236,7 +236,7 @@ public class Common {
       }
     };
 
-    try{
+    try {
       Map json = (Map)parser.parse(input, containerFactory);
       Iterator iter = json.entrySet().iterator();
       while(iter.hasNext()){
