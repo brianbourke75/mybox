@@ -254,7 +254,7 @@ public class ClientGUI extends java.awt.Frame {
 
     syncnowItem.addActionListener(new ActionListener() {
       public void actionPerformed(ActionEvent e) {
-        client.sync();
+        client.FullSync();
       }
     });
 

@@ -1,4 +1,5 @@
-package net.mybox.mybox.mbfs;
+package net.mybox.mybox;
+
 
 public class MyFile {
 

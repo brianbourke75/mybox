@@ -37,52 +37,7 @@ public class ClientSetup {
 
   private String configFile = Client.defaultConfigFile;
   
-  private String sshSettingsDir = System.getProperty("user.home") +
-          System.getProperty("file.separator") + ".ssh/";
     
-
-  /**
-   * Check that the necessary files and scripts exist and have the correct permissions
-   */
-  private void checkFiles() {
-
-    // make sure necessarry local files and directories exist with correct permissions
-
-    // create .ssh directory
-    
-    File dirSsh = new File(sshSettingsDir);
-    if (!dirSsh.isDirectory()) {
-      Client.printMessage(dirSsh + " does not exist, so it is being created");
-
-      if (!dirSsh.mkdir())
-        Client.printErrorExit("unable to create .ssh directory");
-
-      // TODO: set permissions too?
-    }
-
-    // touch known_hosts file
-    try {
-      File knownHostsFile = new File(dirSsh + "known_hosts");
-      if (!knownHostsFile.exists())
-        org.apache.commons.io.FileUtils.touch(knownHostsFile);
-    }
-    catch (Exception e) {
-      Client.printErrorExit("There was an error creating the known_hosts file: " + e);
-    }
-
-    File sshScript = new File(Client.sshCommand);
-    File unisonCommand = new File(Client.clientUnisonCommand);
-
-    if (!sshScript.exists() || !unisonCommand.exists())
-      Client.printErrorExit("Unable to find local unison and ssh scripts " + unisonCommand + " " + sshScript);
-
-    if (!sshScript.canExecute()) // does this require java 1.6?
-      sshScript.setExecutable(true);  // linux only? will this bork in windows?
-
-    if (!unisonCommand.canExecute())
-      unisonCommand.setExecutable(true);
-
-  }
 
   /**
    * Get the initial input from the user
@@ -150,72 +105,6 @@ public class ClientSetup {
   }
   
   
-  /**
-   * Configure known_hosts file, generate keypairs and test the ssh connection
-   */
-  private void configSSH(Client client) {
-
-    // set the local known_hosts file
-    Client.setKnownHosts(account.serverName);  // should check return code
-
-    // check to see if unison is installed on the client side
-    SysResult localResult = Common.syscommand(new String[]{Client.clientUnisonCommand, "-version"});
-
-    if (localResult.output.contains("unison"))
-      Client.printMessage("Checking for local copy of unison: Passed");
-    else
-      Client.printErrorExit("Local unison cannot be found");
-
-    // check to see if a local key is already present
-
-    String keyFileName = System.getProperty("user.home") + "/.ssh/mybox_rsa";
-
-    SysResult testkAuthResult = null;
-
-    File keyFile = new File(keyFileName);
-
-    if (keyFile.exists()) {
-      // check to see if we can already SSH to the server with the local key
-      testkAuthResult = Client.runSshCommand(account.serverName, account.serverPOSIXaccount,
-              keyFileName, client.serverUnisonCommand + " -version");
-    }
-
-    // if existing key already works dont generate a new one
-    if (testkAuthResult != null && testkAuthResult.worked) {
-      Client.printMessage("Primary auth test passed. No need to generate new key.");
-    }
-    // else generate a new one
-    else {
-      Client.printMessage("Primary auth test failed. So a new key will be generated.");
-
-      // make the new key and copy it to the server
-      SysResult keygenResult = Client.keyGen();
-      SysResult keytranserResult = Client.transferPublicKey(account.serverName, account.serverPOSIXaccount,
-              password, keygenResult.output + ".pub");
-
-      if (!keygenResult.worked && !keytranserResult.worked)
-        Client.printErrorExit("There was an error when handling SSH keys");
-
-      // test ssh (via JSch) authentication with the generated key
-      SysResult kAuthResult = Client.runSshCommand(account.serverName, account.serverPOSIXaccount,
-              keygenResult.output, client.serverUnisonCommand + " -version");
-
-      if (kAuthResult.worked && kAuthResult.output.equals(localResult.output))
-        Client.printMessage("testing key auth: Passed");
-      else
-        Client.printErrorExit("Error performing key authentication");
-    }
-
-    // test ssh (via command shell) authentication with the generated key
-    SysResult pkAuthResult = Common.syscommand(new String[]{Client.sshCommand,
-            account.serverPOSIXaccount + "@" + account.serverName, client.serverUnisonCommand, "-version"});
-
-    if (pkAuthResult.worked && pkAuthResult.output.equals(localResult.output))
-      Client.printMessage("testing process key auth: Passed");
-    else
-      Client.printErrorExit("Error performing process key authentication");
-
-  }
   
   /**
    * Generate the config file after everything has been setup
@@ -252,8 +141,19 @@ public class ClientSetup {
     account = new ClientAccount();
     account.serverName = "localhost";
     account.serverPort = Common.defaultCommunicationPort;
-    account.email = "bill@microsoft.com";
+    account.email = "bill@gates.com";
     password = "bill";  // only used for POSIX login
+    
+        // app settings directory
+    File dirCheck = new File(Client.defaultConfigDir);
+    if (!dirCheck.exists()) {
+//      Client.printMessage("Creating directory since it does not exist...");
+      if (dirCheck.mkdir())
+        Client.printMessage("Created directory " + Client.defaultConfigDir);
+      else
+        Client.printMessage("Unable to create directory"); // error?
+    }
+    
     
     Client.printMessage("Welcome to the Mybox setup wizard");
     
@@ -264,18 +164,14 @@ public class ClientSetup {
     account = client.startGetAccountMode(account.serverName, account.serverPort, account.email);
     client.stop();
 
-    if (account.serverPOSIXaccount == null)
-      Client.printErrorExit("Unable to determine POSIX account during setup");
-    
-    checkFiles();
 
-    configSSH(client);
 
+    // data directory
     Client.printMessage("testing directory " + account.directory);
 
-    File dirCheck = new File(account.directory);
+    dirCheck = new File(account.directory);
     if (!dirCheck.exists()) {
-      Client.printMessage("Creating directory since it does not exist...");
+//      Client.printMessage("Creating directory since it does not exist...");
       if (dirCheck.mkdir())
         Client.printMessage("Created directory " + account.directory);
       else

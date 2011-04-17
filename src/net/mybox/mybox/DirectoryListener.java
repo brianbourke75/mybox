@@ -39,20 +39,25 @@ public class DirectoryListener {
   
   private JNotifyListener jListener = new JNotifyListener() {
 
+    @Override
       public void fileRenamed(int wd, String rootPath, String oldName, String newName) {
-        client.directoryUpdate("renamed " + rootPath + " : " + oldName + " -> " + newName);
+//        client.directoryUpdate("renamed " + rootPath + " : " + oldName + " -> " + newName);
+        client.directoryUpdate("renamed", oldName + " -> " + newName);
       }
 
+    @Override
       public void fileModified(int wd, String rootPath, String name) {
-        client.directoryUpdate("modified " + rootPath + " : " + name);
+        client.directoryUpdate("modified", name);
       }
 
+    @Override
       public void fileDeleted(int wd, String rootPath, String name) {
-        client.directoryUpdate("deleted " + rootPath + " : " + name);
+        client.directoryUpdate("deleted", name);
       }
 
+    @Override
       public void fileCreated(int wd, String rootPath, String name) {
-        client.directoryUpdate("created " + rootPath + " : " + name);
+        client.directoryUpdate("created", name);
       }
     };
     

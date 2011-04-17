@@ -29,7 +29,7 @@ public class ClientAccount {
     public String serverName = null;
     public int serverPort = Common.defaultCommunicationPort;
     public String email = null;
-    public String serverPOSIXaccount = null;
+//    public String serverPOSIXaccount = null;
     public String directory = Client.defaultClientDir;
     public String salt = null;
     public String encryptedPassword = null;

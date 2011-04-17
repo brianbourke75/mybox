@@ -1,4 +1,4 @@
-package net.mybox.mybox.mbfs;
+package net.mybox.mybox;
 
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -7,6 +7,70 @@ import java.io.FileOutputStream;
 import java.io.FileInputStream;
 
 public class ByteStream {
+
+//
+//  // TODO: make sure these Long functions are correct
+//
+//  private static byte[] toByteArray(long in_long) {
+//    byte a[] = new byte[8];
+//
+//    System.out.println("sending long: " + in_long + "  ");
+//
+//    for (int i=0; i < 8; i++) {
+//
+//      long  b_long = (in_long >> (i*8) ) & 255;
+//      byte b = (byte) ( b_long );
+//
+//      a[i] = b;
+//
+//      System.out.print(a[i] + " ");
+//    }
+//    return a;
+//  }
+//
+//  private static long toLong(byte[] byte_array_8) {
+//    long ret = 0;
+//    for (int i=0; i<8; i++) {
+//      ret += byte_array_8[i] & 0xff <<(8*i);
+//
+////      long b = (long) byte_array_8[i];
+////      if (i<3 && b<0) {
+////        b=256+b;
+////      }
+////      ret += b << (i*8);
+//
+//      //value += (by[i] & 0xff) << (8 * i);
+//    }
+//    return ret;
+//  }
+//
+//  public static long toLong(InputStream in) throws java.io.IOException {
+//    byte[] byte_array_8 = new byte[8];
+//
+//    byte_array_8[0] = (byte) in.read();
+//    byte_array_8[1] = (byte) in.read();
+//    byte_array_8[2] = (byte) in.read();
+//    byte_array_8[3] = (byte) in.read();
+//    byte_array_8[4] = (byte) in.read();
+//    byte_array_8[5] = (byte) in.read();
+//    byte_array_8[6] = (byte) in.read();
+//    byte_array_8[7] = (byte) in.read();
+//
+//    return toInt(byte_array_8);
+//  }
+//
+//  public static void toStream(OutputStream os, long l) throws java.io.IOException {
+//
+//    System.out.println("sending long: " + l + "  ");
+//
+//    byte [] byte_array_8 = toByteArray(l);
+//
+//    System.out.println("Converted back: " + toLong(byte_array_8));
+//
+//    os.write(byte_array_8);
+//  }
+
+
   private static byte[] toByteArray(int in_int) {
     byte a[] = new byte[4];
     for (int i=0; i < 4; i++) {
@@ -54,6 +118,8 @@ public class ByteStream {
     }
     return ret;
   }
+
+
 
   public static void toStream(OutputStream os, int i) throws java.io.IOException {
     byte [] byte_array_4 = toByteArray(i);

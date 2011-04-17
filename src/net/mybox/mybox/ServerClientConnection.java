@@ -23,28 +23,244 @@ package net.mybox.mybox;
 
 import java.net.*;
 import java.io.*;
+import java.util.*;
+import org.json.simple.*;
 
 /**
  * This object is a thread instance mantained by the server that represents a connected client
  */
 public class ServerClientConnection extends Thread {
 
-  private Server server = null;
+  private Server parent = null;
   private Socket socket = null;
   private int handle = -1;
-  private DataInputStream streamIn = null;
-  private DataOutputStream streamOut = null;
   public int failedRequestCount = 0;
 
   // TODO: make externally read only
   public ServerDB.Account account = null;
 
+  private InputStream inStream = null;
+  private DataInputStream dataInStream = null;
+  private OutputStream outStream = null;
+  private DataOutputStream dataOutStream = null;
+
+
+
+  private static LinkedList<MyFile> outQueue = new LinkedList<MyFile>();
+
+  private static String localDir = null;
+
 
   public ServerClientConnection(Server _server, Socket _socket) {
-    super();
-    server = _server;
+    //super();
+
+    parent = _server;
     socket = _socket;
     handle = socket.getPort();
+
+    try {
+      inStream = socket.getInputStream();
+      outStream = socket.getOutputStream();
+    } catch (Exception e) {
+      System.out.println("Error setting socket streams");
+    }
+
+    dataInStream = new DataInputStream(inStream);
+    dataOutStream = new DataOutputStream(outStream);
+
+    startServerInputListenerThread();
+
+  }
+
+
+  private synchronized void handleInput(String input) {
+
+    Server.printMessage("(" + Common.now() + ") Client " + handle + ": " + input);
+
+    if (input.equals("c2s")) {
+      try {
+        String fileName = ByteStream.toString(inStream);
+        String fileTimeString = ByteStream.toString(inStream);
+
+        //System.out.println(fileTimeString);
+        
+        long fileTime = Long.valueOf(fileTimeString);
+        System.out.println("getting file: " + fileName + " modtime " + fileTime);
+        File file=new File(localDir + "/" + fileName);
+        ByteStream.toFile(inStream, file);
+        file.setLastModified(fileTime);
+      }
+      catch (Exception e){
+        System.out.println("c2s operation failed: " + e.getMessage());
+      }
+    } else if (input.equals("clientWants")) {
+      try {
+        String fileName = ByteStream.toString(inStream);
+        System.out.println("client requesting from server: " + fileName);
+        File file = new File(localDir + "/" + fileName);
+        if (file.exists()) {
+          outQueue.push(new MyFile(fileName, 10, "file", "s2c"));
+          checkQueue();
+        }
+      } catch (Exception e) {
+        System.out.println("clientWants operation failed: " + e.getMessage());
+      }
+    } else if (input.equals("deleteOnServer")) {
+      try {
+        String fileName = ByteStream.toString(inStream);
+        System.out.println("client requesting deletion on server: " + fileName);
+        File file = new File(localDir + "/" + fileName);
+        if (file.exists()) {
+          file.delete();
+        }
+      } catch (Exception e) {
+        System.out.println("deleteOnServer operation failed: " + e.getMessage());
+      }
+    } else if (input.equals("renameOnServer")) {
+      try {
+        String oldName = ByteStream.toString(inStream);
+        String newName = ByteStream.toString(inStream);
+        System.out.println("client requesting rename on server: " + oldName + " to " + newName);
+        File oldFile = new File(localDir + "/" + oldName);
+        File newFile = new File(localDir + "/" + newName);
+        if (oldFile.exists()) {
+          oldFile.renameTo(newFile);
+        }
+      } catch (Exception e) {
+        System.out.println("deleteOnServer operation failed: " + e.getMessage());
+      }
+    } else if (input.equals("requestServerFileList")) {
+      sendServerFileList();
+    } else if (input.equals("attachaccount")) {
+
+      String args = null;
+
+      try {
+        args = ByteStream.toString(inStream);
+      } catch (Exception e) {
+        //
+      }
+        HashMap attachInput = Common.jsonDecode(args);
+        String email = (String)attachInput.get("email");
+//        String password = (String)attachInput.get("password");
+
+        JSONObject jsonOut = new JSONObject();
+        jsonOut.put("serverMyboxVersion", Common.appVersion);
+        
+        if (attachAccount(email)) {
+          jsonOut.put("status", "success");
+          jsonOut.put("quota", account.quota);
+          jsonOut.put("salt", account.salt);
+          //send("attachaccount_response " + jsonOut);
+        } else {
+          jsonOut.put("status", "failed");
+          jsonOut.put("error", "invalid account");
+          //send("attachaccount_response " + jsonOut);
+        }
+
+        try {
+          sendCommandToClient("attachaccount_response");
+          ByteStream.toStream(outStream, jsonOut.toJSONString());
+        }
+        catch (Exception e) {
+          //
+        }
+
+        Server.printMessage("attachaccount_response: " + jsonOut);
+      
+    } else {
+      Server.printMessage("unknown command: "+ input);
+      failedRequestCount++;
+    }
+
+  }
+
+
+  private void sendServerFileList() {
+
+    System.out.println("getting local file list for: " + localDir);
+
+    try {
+      // get the local file list
+
+      File thisDir = new File(localDir);
+
+      File[] files = thisDir.listFiles(); // TODO: use some FilenameFilter
+
+      JSONArray jsonArray = new JSONArray();
+
+      for (File thisFile : files) {
+        MyFile myFile = new MyFile(thisFile.getName());
+        myFile.modtime = thisFile.lastModified();
+
+        if (thisFile.isFile())
+          myFile.type = "file";
+        else if (thisFile.isDirectory())
+          myFile.type = "directory";
+
+        jsonArray.add(myFile.serialize());
+      }
+
+      sendCommandToClient("requestServerFileList_response");
+      ByteStream.toStream(outStream, jsonArray.toJSONString());
+
+      System.out.println("local file list: " + jsonArray.size() + " files");
+
+    } catch (Exception e) {
+      System.out.println("Error when getting local file list " + e.getMessage());
+    }
+
+  }
+
+  private void sendFile(MyFile myFile) {
+
+    System.out.println("sending file " + myFile.name);
+
+    File fileObj = new File(localDir + "/" + myFile.name);
+
+    try {
+      sendCommandToClient(myFile.action);
+      ByteStream.toStream(outStream, myFile.name);
+      ByteStream.toStream(outStream, fileObj.lastModified() + "");
+      ByteStream.toStream(outStream, fileObj);
+    }catch (Exception e) {
+      System.out.println("error sending file");
+    }
+
+    checkQueue();
+  }
+
+
+  private synchronized void checkQueue() {
+    System.out.println("Checking queue " + outQueue.size());
+
+    if (outQueue.size() > 0) {
+      System.out.println("top queue action: " + outQueue.peek().action);
+      if (outQueue.peek().action.equals("s2c"))
+        sendFile(outQueue.pop());
+    }
+  }
+
+  private void startServerInputListenerThread() {
+
+    // start a new thread for getting input from the client (anonymous ServerInThread)
+    new Thread(new Runnable() {
+      public void run() {
+
+        while (true) {
+          try {
+            System.out.println("Thread waiting to readUTF");
+            handleInput(dataInStream.readUTF());
+          } catch (IOException ioe) {
+            System.out.println("Client disconnected");
+            // assume this happens because the client socket disconnected
+            return;
+          }
+        }
+
+      }
+    }).start();
+
   }
 
   public int getHandle() {
@@ -53,34 +269,30 @@ public class ServerClientConnection extends Thread {
 
   public boolean attachAccount(String email) {
 
-    account = server.serverDb.getAccountByEmail(email);
-/*
-    String encPass = Common.encryptPass(password, account.salt);
-    System.out.println("Trying password input: " + encPass);
-    System.out.println("Comparing to database: " + account.password);
+    account = parent.serverDb.getAccountByEmail(email);
 
-    if (!encPass.equals(account.password)) {
-      Server.printMessage("Password incorrect");
-      return false;
-    }
-*/
+    localDir = account.serverdir;
+
+//    localDir = Server.serverBaseDir + "/" + account.id;
+
     if (account == null) {
       Server.printMessage("Account does not exist " + email); // TODO: return false?
       return false;
     }
     
     Server.printMessage("Attached account "+ account + " to handle " + handle);
+    Server.printMessage("Local server storage in: " + account.serverdir);
     return true;
   }
 
 
-  public void send(String msg) {
+  public void sendCommandToClient(String command) {
     try {
-      streamOut.writeUTF(msg);
-      streamOut.flush();
+      dataOutStream.writeUTF(command);
+    //  dataOutStream.flush();
     } catch (IOException ioe) {
       Server.printMessage(handle + " ERROR sending: " + ioe.getMessage());
-      server.removeClient(handle);
+      parent.removeClient(handle);
       //stop();
     }
   }
@@ -89,31 +301,37 @@ public class ServerClientConnection extends Thread {
   @Override
   public void run() {
     Server.printMessage("Client attached to socket handle " + handle);
+
+    /*
     while (true) {
       try {
-        server.handleMessageFromClient(handle, streamIn.readUTF());
+        parent.handleMessageFromClient(handle, dataInStream.readUTF());
       } catch (IOException ioe) {
         //System.out.println(ID + " ERROR reading: " + ioe.getMessage());
-        server.removeClient(handle);
+        parent.removeClient(handle);
         break;
       }
     }
+     *
+     */
   }
 
   public void open() throws IOException {
-    streamIn = new DataInputStream(new BufferedInputStream(socket.getInputStream()));
-    streamOut = new DataOutputStream(new BufferedOutputStream(socket.getOutputStream()));
+//    dataInStream = new DataInputStream(new BufferedInputStream(socket.getInputStream()));
+//    dataOutStream = new DataOutputStream(new BufferedOutputStream(socket.getOutputStream()));
   }
 
   public void close() throws IOException {
     if (socket != null) {
       socket.close();
     }
+    /*
     if (streamIn != null) {
       streamIn.close();
     }
     if (streamOut != null) {
       streamOut.close();
     }
+     */
   }
 }

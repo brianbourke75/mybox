@@ -45,20 +45,20 @@ public class ServerSetup {
 
     String input = null;
     
-    Client.printMessage_("Port ["+port+"]: ");
+    Server.printMessage_("Port ["+port+"]: ");
     
     try {   input = br.readLine();   }    catch (Exception e) {   }
     if (!input.isEmpty())  
       port = Integer.parseInt(input); // catch
 
-    Client.printMessage_("Quota in megabytes ["+defaultQuota+"]: ");
+    Server.printMessage_("Quota in megabytes ["+defaultQuota+"]: ");
 
     try {   input = br.readLine();   }    catch (Exception e) {   }
 
     if (!input.isEmpty())
       defaultQuota = Integer.parseInt(input);  //catch
 
-    Client.printMessage_("Config file ["+configFile+"]: ");
+    Server.printMessage_("Config file ["+configFile+"]: ");
 
     try {   input = br.readLine();   }    catch (Exception e) {   }
     if (!input.isEmpty())
@@ -67,18 +67,11 @@ public class ServerSetup {
 
   private boolean setupDirectories() {
 
-    // add .ssh to /etc/skel
+    File baseDir = new File(Server.serverBaseDir);
 
-    File sshdir = new File("/etc/skel/.ssh");
-
-    if (!sshdir.exists())
-      if (!sshdir.mkdir())
+    if (!baseDir.exists())
+      if (!baseDir.mkdir())
         return false;
-
-    // make sure the permissions are correct
-    SysResult result = Common.syscommand(new String[]{"sudo", "chmod", "0700", sshdir.getAbsolutePath()});
-    if (!result.worked)
-      return false;
 
     return true;
   }
@@ -140,7 +133,7 @@ public class ServerSetup {
    */
   private ServerSetup() {
 
-    Client.printMessage("Welcome to the Mybox server setup wizard");
+    Server.printMessage("Welcome to the Mybox server setup wizard");
     // TODO: make sure they are the superuser
     
     // TODO: add facility to create a new database
@@ -178,18 +171,18 @@ public class ServerSetup {
     } catch( Exception exp ) {
       System.err.println( exp.getMessage() );
       HelpFormatter formatter = new HelpFormatter();
-      formatter.printHelp( Client.class.getName(), options );
+      formatter.printHelp( Server.class.getName(), options );
       return;
     }
 
     if (cmd.hasOption("h")) {
       HelpFormatter formatter = new HelpFormatter();
-      formatter.printHelp( Client.class.getName(), options );
+      formatter.printHelp( Server.class.getName(), options );
       return;
     }
 
     if (cmd.hasOption("V")) {
-      Client.printMessage("version " + Common.appVersion);
+      Server.printMessage("version " + Common.appVersion);
       return;
     }
 
@@ -198,7 +191,7 @@ public class ServerSetup {
       try {
         Common.updatePaths(appHomeDir);
       } catch (FileNotFoundException e) {
-        Client.printErrorExit(e.getMessage());
+        Server.printErrorExit(e.getMessage());
       }
 
       Server.updatePaths();

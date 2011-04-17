@@ -222,7 +222,7 @@ public class ServerDB {
     Account accountById = getAccountByID(id);
     Account accountByEmail = getAccountByEmail(email);
 
-    System.out.println("Account exists? " + accountById + ", " + accountByEmail);
+//    System.out.println("Account exists? " + accountById + ", " + accountByEmail);
 
     if (accountByEmail != null || accountById != null) // id and email are unique in database
       return false;
@@ -290,7 +290,7 @@ public class ServerDB {
     try {  expr = xpath.compile("/server/accounts/account");} catch (Exception e) {}
     try {  accounts = (NodeList)expr.evaluate(xmlDB, XPathConstants.NODESET); } catch (Exception e) {}
 
-    Server.printMessage("id\temail\t\tposix account");
+    Server.printMessage("id\temail\t\tserver directory");
 
     for (int u=0; u<accounts.getLength(); u++) {
       Node account = accounts.item(u);
@@ -301,14 +301,12 @@ public class ServerDB {
       String email = null;
       try {   email = (String)xpath.evaluate("email", account, XPathConstants.STRING); } catch (Exception e) {}
 
-      String posixAccount = Server.getServerPOSIXaccountName(id);
+      File dir = new File(Server.serverBaseDir + "/" + id);
+      String dirString = "";
+      if (dir.isDirectory())
+        dirString = dir.getAbsolutePath();
 
-      File posixDirExists = new File("/home/" + posixAccount);
-      String exists = "";
-      if (!posixDirExists.isDirectory())
-        exists = " (/home/" + posixAccount + " does not exist!)";
-
-      Server.printMessage(id +"\t" + email + "\t" + posixAccount + exists);
+      Server.printMessage(id +"\t" + email + "\t" + dirString);
     }
 
   }
@@ -399,7 +397,7 @@ public class ServerDB {
 
     int quota = Server.defaultQuota;
     String serverdir = null;  //not in db
-    String serverPOSIXaccount = null;  //not in db
+//    String serverPOSIXaccount = null;  //not in db
 
 
     public Account(String id, String email, String password, String salt, int quota) {
@@ -410,11 +408,13 @@ public class ServerDB {
       this.id = id;
       this.email = email;
       this.quota = quota;
-      serverPOSIXaccount = Server.getServerPOSIXaccountName(id);
+//      serverPOSIXaccount = Server.getServerPOSIXaccountName(id);
       //serverdir = "/home/" + serverPOSIXaccount + "/Mybox/";  // TODO: set dynamically based on system
 
       this.salt = salt;
       this.password = password;
+
+      this.serverdir = Server.serverBaseDir + "/" + id;
     }
 
     @Override

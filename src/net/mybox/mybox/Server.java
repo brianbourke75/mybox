@@ -49,9 +49,11 @@ public class Server {
   public static String defaultConfigFile = null;//Common.getAppHome() + "/mybox_server.conf";
   public static final String logFile = "/tmp/mybox_server.log";
   
-  private static final String serverPOSIXacctPrefix = "mbu_";
+//  private static final String serverPOSIXacctPrefix = "mbu_";
   
   public static String serverUnisonCommand = null;
+
+  public static String serverBaseDir = System.getProperty("user.home") + "/mbServerSpace";
 
   static {
     updatePaths();
@@ -103,11 +105,13 @@ public class Server {
     System.out.println(message);
     log(message + "\n");
   }
-
+/*
   public static String getServerPOSIXaccountName(String id) {
     return serverPOSIXacctPrefix + id;
   }
 
+ *
+ */
   private void readConfig(String configFile) {
     Properties properties = new Properties();
 
@@ -156,82 +160,6 @@ public class Server {
     }
   }
 
-  public void sendMessageToClient(int handle, String message) {
-    ServerClientConnection thisClient = clients.get(handle);
-    thisClient.send(message);// TODO: check null
-  }
-
-  /**
-   * Deal with items sent from a client to this server
-   */ 
-  public synchronized void handleMessageFromClient(int handle, String input) {
-
-    printMessage("(" + Common.now() + ") Client " + handle + ": " + input);
-
-    String[] iArgs = input.split(" ");
-    String command = iArgs[0];
-    String args = StringUtils.join(iArgs, " ", 1, iArgs.length);
-
-    ServerClientConnection thisClient = clients.get(handle);
-    
-    if (input.equals("quit")) {
-      clients.get(handle).send("quit");
-      removeClient(handle);
-    }
-    else if (input.equals("syncfinished")){
-      // find all connected clients under the same username and issue a sync command to them
-
-      Set<Map.Entry<Integer, ServerClientConnection> > set = clients.entrySet();
-
-      for (Map.Entry<Integer, ServerClientConnection> client : set) {
-
-        if (client.getValue().account.id.equals(thisClient.account.id) && client.getKey()!=handle ) {
-          printMessage("issue sync to client " + client.getValue());
-          client.getValue().send("sync");
-        }
-
-      }
-
-      printMessage("Done with catchup syncs");
-
-    }
-    else if (command.equals("attachaccount")) {
-
-      if (thisClient != null) {
-
-        HashMap attachInput = Common.jsonDecode(args);
-        String email = (String)attachInput.get("email");
-//        String password = (String)attachInput.get("password");
-
-        JSONObject jsonOut = new JSONObject();
-        jsonOut.put("serverMyboxVersion", Common.appVersion);
-        
-        if (thisClient.attachAccount(email)) {
-          jsonOut.put("status", "success");
-          jsonOut.put("serverPOSIXaccount", thisClient.account.serverPOSIXaccount);
-          jsonOut.put("quota", thisClient.account.quota);
-          jsonOut.put("serverUnisonCommand", serverUnisonCommand);
-          jsonOut.put("salt", thisClient.account.salt);
-
-          /*
-          File userDir = new File(thisClient.userDir);
-          long bytes = org.apache.commons.io.FileUtils.sizeOfDirectory(userDir);
-          jsonOut.put("totalspaceused", ((float) bytes / (1024L * 1024L)));
-          */
-
-          sendMessageToClient(handle, "attachaccount_response " + jsonOut);
-        } else {
-          jsonOut.put("status", "failed");
-          jsonOut.put("error", "invalid account");
-          sendMessageToClient(handle, "attachaccount_response " + jsonOut);
-        }
-      }
-    }
-    else {
-      printMessage("unknown command: "+ input);
-      thisClient.failedRequestCount++;
-    }
-  }
 
   /**
    * Remove a client connection from the server

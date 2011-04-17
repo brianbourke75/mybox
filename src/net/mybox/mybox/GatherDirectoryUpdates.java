@@ -40,6 +40,8 @@ public class GatherDirectoryUpdates extends Thread {
 
   public void run(){
 
+    // TODO: perhaps use wait/notify instead?
+
     // sleep the thread for some time
     try{
       GatherDirectoryUpdates.sleep(1000*SleepSeconds);
