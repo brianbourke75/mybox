@@ -66,8 +66,6 @@ public class Common {
 
     File getAbsPath = new File(newAppHome); // note: this will work even if the file does not exist
     newAppHome = getAbsPath.getAbsolutePath();
-
-    File checkExists = new File(newAppHome + "/inc/ssh-ident.bash");
     
     // we allow these to be set and determine correctness after excaption for initialization purposes
     appHome = newAppHome;
@@ -76,9 +74,6 @@ public class Common {
 //    Server.updatePaths();
 //    Client.updatePaths();
 
-    if (!checkExists.isFile())
-      throw new FileNotFoundException("Unable to set the application home directory to ("+ newAppHome +"). Make sure the inc directory is set up correctly.");
-    
   }
 
   /**
@@ -105,6 +100,117 @@ public class Common {
   public static String now() {
     SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
     return sdf.format(Calendar.getInstance().getTime());
+  }
+
+  /**
+  * Recursively walk a directory tree and return a List of all
+  * Files found; the List is sorted using File.compareTo().
+  *
+  * @param aStartingDir is a valid directory, which can be read.
+  */
+  static public List<MyFile> getFileListing(File aStartingDir) throws FileNotFoundException {
+    if (!aStartingDir.isDirectory())
+      return null;
+    List<MyFile> result = getFileListingNoSort("", aStartingDir);
+    //Collections.sort(result);
+    return result;
+  }
+
+  // PRIVATE //
+  static private List<MyFile> getFileListingNoSort(String localParent, File aStartingDir) throws FileNotFoundException {
+    List<MyFile> result = new ArrayList<MyFile>();
+    File[] filesAndDirs = aStartingDir.listFiles();
+    List<File> filesDirs = Arrays.asList(filesAndDirs);
+    for(File file : filesDirs) {
+
+      String prefix = "";
+      
+      if (!localParent.equals(""))
+        prefix = localParent + "/";
+      
+      MyFile myFile = new MyFile(prefix + file.getName());
+//        myFile.name = localParent + "/" + file.getName();
+
+      myFile.modtime = file.lastModified();
+      
+      if (file.isFile()) {
+        myFile.type = "file";
+        
+        result.add(myFile);
+      }
+      else if (file.isDirectory()) {
+        
+        myFile.type = "directory";
+
+        result.add(myFile);
+
+      //result.add(file); //always add, even if directory
+      //if ( ! file.isFile() ) {
+        //must be a directory
+        //recursive call!
+        List<MyFile> deeperList = getFileListingNoSort(prefix + file.getName(), file);
+        result.addAll(deeperList);
+      }
+    }
+    return result;
+  }
+
+  public static boolean createLocalDirectory(String path) {
+
+    File dir = new File(path);
+
+    System.out.println("Creating local directory " + path);
+
+    if (!dir.isDirectory()) { // dont bother creating it if it already exists
+      if (dir.exists() ) {
+        System.out.println("Error creating local directory, because file exists");
+        return false;
+      }
+      else
+        return dir.mkdirs();
+    }
+
+    return true;
+  }
+
+
+  public static boolean deleteLocalDirectory(File path) {
+    if( path.exists() ) {
+      File[] files = path.listFiles();
+      for(int i=0; i<files.length; i++) {
+         if(files[i].isDirectory()) {
+           deleteLocalDirectory(files[i]);
+         }
+         else {
+           files[i].delete();
+         }
+      }
+    }
+    return( path.delete() );
+  }
+
+  
+  public static boolean deleteLocal(String path) { // file or directory
+    System.out.println("Deleting local item " + path);
+
+    File thisFile = new File(path);
+    if (thisFile.isDirectory())
+      return Common.deleteLocalDirectory(thisFile);
+    else if (thisFile.exists())
+      return thisFile.delete();
+
+    return false;
+  }
+
+  public static boolean renameLocal(String oldPath, String newPath) {
+    System.out.println("Renaming local item " + oldPath + " to " + newPath);
+
+    File oldFile = new File(oldPath);
+    File newFile = new File(newPath);
+
+    return (oldFile.renameTo(newFile));
+    
+//      System.out.println("Error durring rename");
   }
 
   /**

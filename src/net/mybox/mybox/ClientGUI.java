@@ -439,7 +439,7 @@ public class ClientGUI extends java.awt.Frame {
     public static void main(String args[]) {
 
       Options options = new Options();
-      options.addOption("c", "config", true, "configuration file");
+      options.addOption("c", "config", true, "configuration directory (default=~/.mybox)");
       options.addOption("a", "apphome", true, "application home directory");
       options.addOption("d", "debug", false, "enable debug mode");
       options.addOption("h", "help", false, "show help screen");
@@ -447,6 +447,8 @@ public class ClientGUI extends java.awt.Frame {
 
       CommandLineParser line = new GnuParser();
       CommandLine cmd = null;
+
+      String configDir = Client.defaultConfigDir;
 
       try {
         cmd = line.parse(options, args);
@@ -484,21 +486,13 @@ public class ClientGUI extends java.awt.Frame {
         Client.updatePaths();
       }
 
-      configFile = Client.defaultConfigFile;
-
-
       if (cmd.hasOption("c")) {
-        configFile = cmd.getOptionValue("c");
-        File fileCheck = new File(configFile);
-        if (!fileCheck.isFile())
-          printErrorExit("Specified config file does not exist: " + configFile);
-      } else {
-        File fileCheck = new File(configFile);
-        if (!fileCheck.isFile())
-          printErrorExit("Default config file does not exist: " + configFile);
+        configDir = cmd.getOptionValue("c");
       }
 
-        
+      Client.setConfigDir(configDir);
+
+      
       java.awt.EventQueue.invokeLater(new Runnable() {
         public void run() {
           new ClientGUI(configFile);

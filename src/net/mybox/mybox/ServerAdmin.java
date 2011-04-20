@@ -33,7 +33,7 @@ public class ServerAdmin {
 
 
   /**
-   * Delete POSIX account and update user database
+   * Delete account and update user database
    */
   private void deleteAccount(){
 
@@ -74,7 +74,7 @@ public class ServerAdmin {
   }
 
   /**
-   * Add POSIX account and update database
+   * Add account and update database
    */
   private void addAccount() {
 
@@ -129,7 +129,7 @@ public class ServerAdmin {
   
   
   /**
-   * Delete POSIX account and update user database
+   * 
    */
   private void showEncryptedPassword(){
 

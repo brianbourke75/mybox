@@ -56,17 +56,25 @@ public class Client {
   private ClientAccount account = new ClientAccount();
 
   // static system specific settings
-  private final String ServerDir = "Mybox";
+//  private final String ServerDir = "Mybox";
+  
+  // data directory
   public static final String defaultClientDir = System.getProperty("user.home") + "/Mybox";
   public static final String defaultConfigDir = System.getProperty("user.home") + "/.mybox";
-  public static final String defaultConfigFile = defaultConfigDir + "/mybox_client.conf";
-  public static final String logFile = defaultConfigDir + "/mybox_client.log";
-  public static final String lastSyncFile = defaultConfigDir + "/lasysync.txt";
+//  public static final String defaultConfigFile = defaultConfigDir + "/mybox_client.conf";
+//  public static final String logFile = defaultConfigDir + "/mybox_client.log";
+//  public static final String lastSyncFile = defaultConfigDir + "/lasysync.txt";
 
+  public static final String configFileName = "mybox_client.conf";
+  public static final String logFileName = "mybox_client.log";
+  public static final String lastSyncFileName = "lasysync.txt";
 
+  public static String configFile = null;
+  public static String logFile = null;
+  public static String lastSyncFile = null;
+  
 
-
-  private static String localDir = defaultClientDir;
+  private static String localDir = null;  // data directory
 
   private OutputStream outStream = null;
   private DataOutputStream dataOutStream = null;
@@ -79,11 +87,12 @@ public class Client {
   
   // filenames that are expected to be recieved. removed once that are finished downloading
   public Set<String> incoming = new HashSet<String>();
+  public String ignoreUpdatesTo = null;
 
-  private long lastSync = 0;  // TODO: set this / store this somewhere in DB/filesystem
+  private long lastSync = 0;
 
   // serverFileList
-  public HashMap<String, MyFile> S = new HashMap<String, MyFile>();  // should nullify when done since global
+  public HashMap<String, MyFile> S = new HashMap<String, MyFile>();
   // clientFileList
   public HashMap<String, MyFile> C = new HashMap<String, MyFile>();
 
@@ -95,8 +104,6 @@ public class Client {
   static {
     updatePaths();
   }
-
-
 
 
   // FILE CLIENT METHODS
@@ -133,6 +140,7 @@ public class Client {
     return true;
   }
 
+
   private synchronized void handleInput(String operation) {
 
     System.out.println("input operation: " + operation);
@@ -140,21 +148,85 @@ public class Client {
     if (operation.equals("s2c")) {
       try {
         String file_name = ByteStream.toString(inStream);
+
+        ignoreUpdatesTo = localDir +"/" + file_name;
+        System.out.println("Setting ignoreUpdatesTo: " + ignoreUpdatesTo);
+
         String fileTimeString = ByteStream.toString(inStream);
 
         long fileTime = Long.valueOf(fileTimeString);
 
         System.out.println("getting file: " + file_name);
-        File file=new File(localDir + "/" + file_name);
-        ByteStream.toFile(inStream, file);
-        file.setLastModified(fileTime);
+
+        File existingFile = new File(localDir +"/" + file_name);
+
+
+        if (existingFile.isFile() && existingFile.lastModified() == fileTime) {
+          // very crappy hack until I can figure a way around this
+          System.out.println("incoming matches existing file, running to to null");
+          
+          File file=new File("/tmp/incomingDummy");
+          ByteStream.toFile(inStream, file);
+          
+        } else {
+
+          File file=new File(localDir + "/" + file_name);
+          ByteStream.toFile(inStream, file);
+          file.setLastModified(fileTime);
+          
+        }
         incoming.remove(file_name);
         for (String in : incoming)  System.out.print("  " + in);
+
+        System.out.println("Removing ignoreUpdatesTo: " + ignoreUpdatesTo);
+        ignoreUpdatesTo = null;
+
       }
       catch (Exception e){
         System.out.println("Operation failed: " + e.getMessage());
       }
-    } else if (operation.equals("requestServerFileList_response")) {
+    } else if (operation.equals("deleteOnClient")) {  // catchup operation
+      try {
+        String name = ByteStream.toString(inStream);
+//        System.out.println("deleting local file: " + name);
+        Common.deleteLocal(localDir +"/"+ name);  // should assess return value
+//        incoming.remove(file_name);
+      }
+      catch (Exception e){
+        System.out.println("Operation failed: " + e.getMessage());
+      }
+
+    }
+    else if (operation.equals("renameOnClient")) {  // catchup operation
+      try {
+        String arg = ByteStream.toString(inStream);
+        String[] args = arg.split(" -> ");
+        Common.renameLocal(localDir +"/"+ args[0], localDir +"/"+ args[2]);
+//        System.out.println("rename local file: " + args[0] + " to " + args[1]);
+        //renameOnServer(logFileName, arg);
+//        incoming.remove(file_name);
+      }
+      catch (Exception e){
+        System.out.println("Operation failed: " + e.getMessage());
+      }
+
+    }
+    else if (operation.equals("createDirectoryOnClient")) {  // catchup operation
+      try {
+        String name = ByteStream.toString(inStream);
+        //System.out.println("create local directory: " + name);
+        Common.createLocalDirectory(localDir +"/"+ name);
+
+//        incoming.remove(file_name);
+      }
+      catch (Exception e){
+        System.out.println("Operation failed: " + e.getMessage());
+      }
+
+    }
+
+
+    else if (operation.equals("requestServerFileList_response")) {
 
       try {
         String jsonString = ByteStream.toString(inStream);
@@ -234,13 +306,7 @@ public class Client {
   public synchronized void checkQueue() {
 
     if (outQueue.size() > 0) {
-//      if (outQueue.peek().action.equals("c2s"))
-        sendFile(outQueue.pop());
-//      else if (outQueue.peek().action.equals("clientWants"))
-//        requestFile(outQueue.pop().name);
-//      else if (outQueue.peek().action.equals("deleteOnServer"))
-//        deleteOnServer(outQueue.pop().name);
-
+      sendFile(outQueue.pop());
       checkQueue();
     }
   }
@@ -252,7 +318,7 @@ public class Client {
     File fileObj = new File(localDir + "/" + myFile.name);
 
     try {
-      sendCommandToServer(myFile.action);
+      sendCommandToServer("c2s");
       ByteStream.toStream(outStream, myFile.name);
       ByteStream.toStream(outStream, fileObj.lastModified() +"");
       ByteStream.toStream(outStream, fileObj);
@@ -261,25 +327,20 @@ public class Client {
     }
   }
 
-  
-  private void deleteLocal(String name) {
-    System.out.println("Deleting local file " + name);
 
-    File thisFile = new File(localDir + "/" + name);
-    if (thisFile.exists())
-      thisFile.delete();
-      
-  }
-  
-
+  /**
+   * Delete an item on the server. A file or directory.
+   * @param name
+   */
   private void deleteOnServer(String name) {
-    System.out.println("Telling server to delete file " + name);
+
+    System.out.println("Telling server to delete item " + name);
 
     try{
       sendCommandToServer("deleteOnServer");
       ByteStream.toStream(outStream, name);
     } catch (Exception e) {
-      System.out.println("error requesting server file delete");
+      System.out.println("error requesting server item delete");
     }
   }
   
@@ -292,6 +353,19 @@ public class Client {
       ByteStream.toStream(outStream, newName);
     } catch (Exception e) {
       System.out.println("error requesting server file rename");
+    }
+  }
+
+
+  private void createDirectoryOnServer(String name) {
+    System.out.println("Telling server to create directory " + name);
+
+    try{
+      sendCommandToServer("createDirectoryOnServer");
+      ByteStream.toStream(outStream, name);
+//      ByteStream.toStream(outStream, ((new File(name)).lastModified()) +"");
+    } catch (Exception e) {
+      System.out.println("error requesting server directory create");
     }
   }
 
@@ -316,33 +390,16 @@ public class Client {
   }
 
 
-
-
   private void populateLocalFileList() {
     try {
-
-      File thisDir = new File(localDir);
-
-      File[] files = thisDir.listFiles(); // TODO: use some FilenameFilter
-
-      //System.out.println("Listing local files: " + files.length);
+      List<MyFile> files = Common.getFileListing(new File(localDir));
 
       JSONArray jsonArray = new JSONArray();
 
-      for (File thisFile : files) {
-        //System.out.println(" " + thisFile.getName());
-        MyFile myFile = new MyFile(thisFile.getName());
-        myFile.modtime = thisFile.lastModified();
-
-        if (thisFile.isFile())
-          myFile.type = "file";
-        else if (thisFile.isDirectory())
-          myFile.type = "directory";
-
-        C.put(myFile.name, myFile);
+      for (MyFile thisFile : files) {
+        System.out.println(" " + thisFile.name);
+        C.put(thisFile.name, thisFile);
       }
-
-      //System.out.println("local file list: " + C.size() + " files");
 
     } catch (Exception e) {
       System.out.println("Error populating local file list " + e.getMessage());
@@ -356,7 +413,6 @@ public class Client {
 
     //if (clientInputListenerThread != null)
     //  return;
-
 
     clientInputListenerThread =
 
@@ -385,8 +441,6 @@ public class Client {
 
   private void GatherSync() {
 
-    // TODO: handle directories
-    
     // Cgather: name(s) => action
     
     //printMessage("disabling listener");
@@ -402,19 +456,26 @@ public class Client {
         renameOnServer(names[0], names[1]);
       } else if (Cgather.get(fname).equals("deleted")) {
         deleteOnServer(fname);
-      } else if (Cgather.get(fname).equals("modified") || Cgather.get("key").equals("created")) {
+      } else if (Cgather.get(fname).equals("modified") || Cgather.get(fname).equals("created")) {
 
         if (incoming.contains(fname)) {
           System.out.println("Ignoring update to " + fname + " since it seems to have come from server");
         }
+        else if (ignoreUpdatesTo != null && ignoreUpdatesTo.equals(localDir + "/" + fname)) {
+          System.out.println("Ignoring update to " + fname);
+        }
         else {
-          MyFile myFile = new MyFile(fname, 0, "file", "c2s");
-          outQueue.addFirst(myFile);
+          if ((new File(localDir + "/" + fname)).isDirectory()) {
+            System.out.println(fname + " is a directory so it will be created on the server");
+            createDirectoryOnServer(fname);
+          }
+          else {
+            outQueue.addFirst(new MyFile(fname, 0, "file"));
+          }
         }
         
       }
     }
-    
     
     checkQueue();
 
@@ -441,8 +502,7 @@ public class Client {
 
     printMessage("Full sync started  " + Common.now() );
 
-
-    // TODO: if lastSysc is 0 or bogus, favorite file creations over deletions
+    // TODO: if lastSysc is 0 or bogus, favoror file creations over deletions
 
     // TODO: update all time comparisons to respect server/client time differences
 
@@ -451,11 +511,8 @@ public class Client {
 
     System.out.println("comparing C=" + C.size() + " to S="+ S.size());
 
-//    LinkedList<MyFile> DoLocal = new LinkedList<MyFile>();
-//    LinkedList<MyFile> TellServer = new LinkedList<MyFile>();
     LinkedList<MyFile> SendToServer = new LinkedList<MyFile>();
 
-    // TODO: handle directories
     // strange case = when there is the same name item but it is a file on the client and dir on server
 
     for (String name : C.keySet()) {
@@ -465,23 +522,21 @@ public class Client {
       if (S.containsKey(name)) {
         MyFile s = S.get(name);
 
-        System.out.println(" lastsync="+lastSync+" c.modtime=" + c.modtime + " s.modtime=" + s.modtime);
+        System.out.println(name + " "+lastSync+" c.modtime=" + c.modtime + " s.modtime=" + s.modtime);
 
-        if (c.modtime != s.modtime) {
+        // if it is not a directory and the times are different, compare times
+        if (!(new File(localDir + "/" + name)).isDirectory() && c.modtime != s.modtime) {
           if (c.modtime > lastSync) {
             if (s.modtime > lastSync) {
               System.out.println(name + " = conflict type 1");
             } else {
-              System.out.println(name + " = transfer from client to server");
-              c.action = "c2s";
+              System.out.println(name + " = transfer from client to server 1");
               SendToServer.addFirst(c);
             }
           } else {
             if (s.modtime > c.modtime) {
               System.out.println(name + " = transfer from server to client 1");
-//              s.action = "clientWants";
               requestFile(s.name);
-//              TellServer.addFirst(s);
             } else {
               System.out.println(name + " = conflict type 2");
             }
@@ -489,59 +544,45 @@ public class Client {
         }
         S.remove(name);
       } else {
-        if (c.modtime > lastSync) {
-          System.out.println(name + " = transfer from client to server");
-          c.action = "c2s";
-          SendToServer.addFirst(c);
-        }
-        else {
-          System.out.println(name + " = remove from client");
-//          c.action = "deleteOnClient";
-//          DoLocal.addFirst(c);
 
-          deleteLocal(name);
+        if ((new File(localDir + "/" + name)).isDirectory()) {
+          System.out.println(name + " = create directory on server");
+          createDirectoryOnServer(name);
+        } else if (c.modtime > lastSync) {
+          System.out.println(name + " = transfer from client to server 2");
+          SendToServer.addFirst(c);
+        } else {
+          System.out.println(name + " = remove from client");
+          Common.deleteLocal(localDir + "/" + name);
+          //deleteLocal(name);
         }
+
       }
     }
 
     for (String name : S.keySet()) {  // which is now S-C
       MyFile s = S.get(name);
 
-      if (s.modtime > lastSync) {
+      if (s.type.equals("directory")) {
+        System.out.println(name + " = create local directory on client");
+        Common.createLocalDirectory(localDir + "/" + name);        
+      } else if (s.modtime > lastSync) {
         System.out.println(name + " = transfer from server to client 2");
         requestFile(s.name);
-        //s.action = "clientWants";
-        //TellServer.addFirst(s);
       } else {
         System.out.println(name + " = remove from server");
         deleteOnServer(s.name);
-//        s.action = "deleteOnServer";
-//        TellServer.addFirst(s);
       }
     }
 
-//    System.out.println("DoLocal");
-//    for (MyFile item : DoLocal) {
-//
-//      if (item.action.equals("deleteOnClient")) {
-//        File thisFile = new File(localDir + "/" + item.name);
-//        if (thisFile.exists())
-//          thisFile.delete();
-//      }
-//      System.out.println(item);
-//    }
-//
-//    System.out.println("TellServer");
-//    for (MyFile item : TellServer) {
-//      outQueue.addLast(item);
-//      System.out.println(item);
-//    }
 
     System.out.println("SendToServer");
     for (MyFile item : SendToServer) {
 
       if (incoming.contains(item.name)) {
         System.out.println("Ignoring update to " + item.name + " since it seems to have come from server");
+      } else if (ignoreUpdatesTo != null && ignoreUpdatesTo.equals(localDir + "/" + item.name)) {
+        System.out.println("Ignoring update to " + item.name);
       } else {
         outQueue.addFirst(item);
         System.out.println(item);
@@ -570,11 +611,6 @@ public class Client {
 
 
 
-
-
-
-
-
   /**
    * Set paths to local files based on the home application path
    */
@@ -585,16 +621,11 @@ public class Client {
     String osName = System.getProperty("os.name").toLowerCase();
 
     if (osName.equals("linux")) {
-//      clientUnisonCommand = incPath + "/unison-2.27.57-linux";
-//      sshCommand = incPath + "/ssh-ident.bash";
+      
     } else if (osName.startsWith("windows")) {
-//      clientUnisonCommand = incPath + "/unison-2.27.57-win_gui.exe";
-//      sshCommand = "inc" + "\\ssh-ident.bat";
-//      sshCommand = incPath + System.getProperty("file.separator") + "ssh-ident.bat";
-      // TODO: make this path absolute. might be a unison argument parsing bug
+      
     } else if (osName.startsWith("mac os x")) {
-//      clientUnisonCommand = incPath + "/unison-2.40.61-macXX";
-//      sshCommand = incPath + "/ssh-ident.bash";
+      
     } else {
       throw new RuntimeException("Unsupported operating system: " + osName);
     }
@@ -719,6 +750,8 @@ public class Client {
     File dirTest = new File(account.directory);
     if (!dirTest.exists())
       printErrorExit("Directory " + account.directory +" does not exist");
+
+    localDir = account.directory;
   }
 
   /**
@@ -767,7 +800,7 @@ public class Client {
       dataOutStream.writeUTF(command);
       //dataOutStream.flush();
     } catch (Exception e) {
-      printWarning("Sending error: " + e.getMessage());
+      printWarning("Sending error for ("+ command +"): " + e.getMessage());
     }
   }
 
@@ -793,9 +826,10 @@ public class Client {
   public void directoryUpdate(String action, String items) {
     printMessage("DirectoryUpdate " + action + " " + items);
 
-    if (items.charAt(items.length()-1) == '/')  // hack: remove trailing slash from jnotify?
-      items = items.substring(0, items.length()-2);
-
+    if (items.charAt(items.length()-1) == '/') { // hack: remove trailing slash from jnotify?
+      items = items.substring(0, items.length()-1);
+      System.out.println("chop result: " + items);
+    }
     if (Cgather.containsKey(items) && Cgather.get(items).equals(action))
       ; // dont bother adding it to the list since it is already there
     else
@@ -810,33 +844,38 @@ public class Client {
 
   /**
    * This is a helper function for ClientSetup that makes a quick connection to the server
-   * just so the ssh user can be determined.
+   * just so the account can be determined.
    * @param serverName
    * @param serverPort
    * @param email
    * @return The account
    */
-  public ClientAccount startGetAccountMode(String serverName, int serverPort, String email) {
+  public ClientAccount startGetAccountMode(String serverName, int serverPort, String email, String dataDir) {
 
-    if (serverName == null)
-      printErrorExit("Client not configured");
-    
+    if (serverName == null) {
+      System.err.println("Client not configured");
+      System.exit(1);
+    }
+
     account.serverName = serverName;
     account.serverPort = serverPort;
     account.email = email;
+    account.directory = dataDir;
 
     account.salt = "0"; // temp hack
 
-    printMessage("Establishing connection to port "+ serverPort +". Please wait ...");
+    System.out.println("Establishing connection to port "+ serverPort +". Please wait ...");
 
     try {
       serverConnectionSocket = new Socket(account.serverName, account.serverPort);
-      printMessage("Connected: " + serverConnectionSocket);
+      System.out.println("Connected: " + serverConnectionSocket);
       dataOutStream = new DataOutputStream(serverConnectionSocket.getOutputStream());
     } catch (UnknownHostException uhe) {
-      printErrorExit("Host unknown: " + uhe.getMessage());
+      System.err.println("Host unknown: " + uhe.getMessage());
+      System.exit(1);
     } catch (IOException ioe) {
-      printErrorExit("Unexpected exception: " + ioe.getMessage());
+      System.err.println("Unexpected exception: " + ioe.getMessage());
+      System.exit(1);
     }
 
     JSONObject jsonOut = new JSONObject();
@@ -844,9 +883,6 @@ public class Client {
 //    jsonOut.put("password", password);
 
 //    client = new ClientServerReceiver(this, serverConnectionSocket);
-
-//    if (!serverDiscussion("attachaccount " + jsonOut) || account.serverPOSIXaccount == null)
-//      printErrorExit("Unable to determine server POSIX account");
 
     return account;
   }
@@ -964,7 +1000,7 @@ public class Client {
 
   public void stop() {
 
-    printMessage("Stopping client");
+//    printMessage("Stopping client");
     setStatus(ClientStatus.DISCONNECTED);
 
     try {
@@ -1020,6 +1056,20 @@ public class Client {
     readConfig(configFile);
   }
 
+  
+  public static void setConfigDir(String configDir) {
+    
+    if (!(new File(configDir)).isDirectory()) {
+      System.err.println("Specified config directory does not exist: " + configDir);
+      System.exit(1);
+    }
+    configFile = configDir + "/" + configFileName;
+    logFile = configDir + "/" + logFileName;
+    lastSyncFile = configDir + "/" + lastSyncFileName;
+
+    System.out.println("Set configFile to " + configFile);
+
+  }
 
   /**
    * Handle the command line args and instantiate the Client
@@ -1028,13 +1078,15 @@ public class Client {
   public static void main(String args[]) {
 
     Options options = new Options();
-    options.addOption("c", "config", true, "configuration file");
+    options.addOption("c", "config", true, "configuration directory (default=~/.mybox)");
     options.addOption("a", "apphome", true, "application home directory");
     options.addOption("h", "help", false, "show help screen");
     options.addOption("V", "version", false, "print the Mybox version");
 
     CommandLineParser line = new GnuParser();
     CommandLine cmd = null;
+
+    String configDir = defaultConfigDir;
 
     try {
       cmd = line.parse(options, args);
@@ -1067,18 +1119,15 @@ public class Client {
       updatePaths();
     }
 
-    String configFile = defaultConfigFile;
-
     if (cmd.hasOption("c")) {
-      configFile = cmd.getOptionValue("c");
-      File fileCheck = new File(configFile);
-      if (!fileCheck.isFile())
-        printErrorExit("Specified config file does not exist: " + configFile);
-    } else {
-      File fileCheck = new File(configFile);
-      if (!fileCheck.isFile())
-        printErrorExit("Default config file does not exist: " + configFile);
+      configDir = cmd.getOptionValue("c");
     }
+    
+    setConfigDir(configDir);
+
+    File fileCheck = new File(configFile);
+    if (!fileCheck.isFile())
+      System.err.println("Config file does not exist: " + configFile);
 
     Client client = new Client();
     client.config(configFile);
@@ -1086,263 +1135,5 @@ public class Client {
   }
 
   
-  // Public static functions for everyone!
-
-
-  /**
-   * Read a file into a string
-   * @param aFile
-   * @return
-   */
-  static public String getContents(File aFile) {
-    //...checks on aFile are elided
-    StringBuilder contents = new StringBuilder();
-
-    try {
-      //use buffering, reading one line at a time
-      //FileReader always assumes default encoding is OK!
-      BufferedReader input =  new BufferedReader(new FileReader(aFile));
-      try {
-        String line = null; //not declared within while loop
-        /*
-        * readLine is a bit quirky :
-        * it returns the content of a line MINUS the newline.
-        * it returns null only for the END of the stream.
-        * it returns an empty String if two newlines appear in a row.
-        */
-        while (( line = input.readLine()) != null){
-          contents.append(line);
-          contents.append(System.getProperty("line.separator"));
-        }
-      }
-      finally {
-        input.close();
-      }
-    }
-    catch (IOException ex){
-      // do something
-    }
-
-    return contents.toString();
-  }
-
-
-  /**
-   * Transfer a public key file to a remote machine.
-   * @param host, where the remote file is to go
-   * @param serverPOSIXaccount, account on remote system
-   * @param password, raw version of the password on the remote accout
-   * @param pubkeyfilename, the local filename of the public key
-   * @return
-   */
-  public static SysResult transferPublicKey(String host, String serverPOSIXaccount, String password, String pubkeyfilename) {
-
-    File pubkeyfile = new File(pubkeyfilename); // TODO: check that the file exists or is not expty
-    String pubkey = Client.getContents(pubkeyfile).trim();
-
-    // TODO: make sure .ssh directory exists on server. mkdir -m 700 .ssh
-
-    // note that the password does not have to be encrypted because SSH should be doing that itself
-
-    SysResult result = Client.runSshCommand(host, serverPOSIXaccount, password, "echo \""+ pubkey +"\" >> ~/.ssh/authorized_keys");
-    return result;
-  }
-
-  public static SysResult keyGen() {
-    String sshDir = System.getProperty("user.home") + "/.ssh";
-    //CommCommon.syscommand("mkdir -p "+sshDir);
-    //CommCommon.syscommand("chmod 700 "+sshDir);
-
-    return keyGen(sshDir + "/mybox_rsa");
-  }
-
-  /**
-   * Create a public/private keypair with a given path/basename
-   * @param filename
-   * @return a SysResult where output is the input filename
-   */
-  public static SysResult keyGen(String filename) {
-
-    SysResult result = new SysResult();
-
-    Common.syscommand(new String[]{"rm", "-f", filename + ".pub"}); // pseudo non-deterministic ubuntu hack
-    Common.syscommand(new String[]{"ssh-add","-l"}); // this is stupid
-
-    // generating with the below method gives "Agent admitted failure to sign using the key." when logging in
-
-    int type=KeyPair.RSA;
-    String comment="generated by mybox";
-    String passphrase="";
-
-    result.output = filename;
-
-    JSch jsch=new JSch();
-
-    try{
-//      KeyPair kpair=KeyPair.genKeyPair(jsch, type);
-      KeyPair kpair=KeyPair.genKeyPair(jsch, type, 2048);
-      kpair.setPassphrase(passphrase);
-      kpair.writePrivateKey(filename);
-      kpair.writePublicKey(filename + ".pub", comment);
-      //System.out.println(kpair.getPublicKeyBlob().toString());
-      //System.out.println("Finger print: "+kpair.getFingerPrint());
-      kpair.dispose();
-      result.worked = true;
-
-      Common.syscommand(new String[]{"chmod", "600", filename});
-    }
-    catch(Exception e){
-      System.err.println("keygen: " + e);
-      result.worked = false;
-    }
-
-    return result;
-  }
-
-  public static boolean setKnownHosts(String host) {
-    try {
-      JSch jsch=new JSch();
-
-      // use bogus account because we dont want to log into the server with a real account.
-      // we only want to generate the local known_hosts file
-      String serverPOSIXaccount = "bogus";
-      String password = "bogus";
-
-      System.out.println("setting known hosts file");
-
-      // TODO: add mkdir .ssh and touch known_hosts for OS X
-      // also chmod 600 .ssh/mybox_rsa
-
-      Session session=jsch.getSession(serverPOSIXaccount, host, 22);
-
-      java.util.Properties config = new java.util.Properties();
-      config.setProperty("StrictHostKeyChecking", "no");
-      session.setConfig(config);
-
-      UserInfo ui=new SshUserInfo();
-      session.setUserInfo(ui);
-      session.setPassword(password);
-
-      session.setConfig("HashKnownHosts",  "yes");
-
-      jsch.setKnownHosts(System.getProperty("user.home") + "/.ssh/known_hosts");
-
-      session.connect();
-
-      // TODO: get return values from SshUserInfo for wrong passwords etc.
-      // System.out.println("Connect returned "+returned);
-
-      session.disconnect();
-
-      System.out.println("known hosts set");
-    }
-    catch(Exception e) {
-      System.out.println(e);
-      return false;
-    }
-    return true;
-  }
-
-  /**
-   * Run remote command over SSH using the JSch library
-   *
-   * @param host
-   * @param serverPOSIXaccount
-   * @param passwordOrIdentFile
-   * @param command
-   * @return
-   */
-  public static SysResult runSshCommand(String host, String serverPOSIXaccount,
-          String passwordOrIdentFile, String command) {
-
-    SysResult result = new SysResult();
-    try{
-      JSch jsch=new JSch();
-
-      System.out.println("sshCommand "+ serverPOSIXaccount + ":" + passwordOrIdentFile + "@" + host + " "+ command);
-
-      Session session=jsch.getSession(serverPOSIXaccount, host, 22);
-
-      UserInfo ui=new SshUserInfo();
-      session.setUserInfo(ui);
-      
-      File identfile = new File(passwordOrIdentFile);
-      
-      if (identfile.exists()) // if it is a private key file, use it
-        jsch.addIdentity(passwordOrIdentFile);
-      else  // else treat the string as a password
-        session.setPassword(passwordOrIdentFile);
-      
-      jsch.setKnownHosts(System.getProperty("user.home") + "/.ssh/known_hosts");
-      session.connect();
-
-      Channel channel=session.openChannel("exec");
-      ((ChannelExec)channel).setCommand(command);
-
-      //channel.setInputStream(System.in);
-      channel.setInputStream(null);
-
-      //channel.setOutputStream(System.out);
-
-      //FileOutputStream fos=new FileOutputStream("/tmp/stderr");
-      //((ChannelExec)channel).setErrStream(fos);
-      ((ChannelExec)channel).setErrStream(System.err);
-
-      InputStream in=channel.getInputStream();
-
-      channel.connect();
-
-      byte[] tmp=new byte[1024];
-      while(true){
-        while(in.available()>0){
-          int i=in.read(tmp, 0, 1024);
-          if(i<0)break;
-          result.output += new String(tmp, 0, i);
-        }
-        if(channel.isClosed()){
-          result.returnCode = channel.getExitStatus();
-          break;
-        }
-        try{Thread.sleep(1000);}catch(Exception ee){}
-      }
-
-      result.worked = true;
-      result.output = result.output.trim();
-      channel.disconnect();
-      session.disconnect();
-    }
-    catch(Exception e){
-      result.worked = false;
-      System.out.println(e);
-    }
-    return result;
-  }
-
-
-  /**
-   * Class needed for SSH authentication via Jsch
-   */
-  public static class SshUserInfo implements UserInfo {
-    public String getPassword(){ return null; }
-    public boolean promptYesNo(String message){
-
-      printMessage("Prompt yes/no: " + message); // perhaps printWarning
-      //Client.quitError("Prompt yes/no: " + message);
-
-      return false; // implies NO
-    }
-
-    public String getPassphrase(){ return null; }
-    public boolean promptPassphrase(String message){ return true; }
-    public boolean promptPassword(String message){
-//      Client.quitError("ssh password prompt failure: " + message);
-      printMessage("ssh password prompt failure: " + message);
-      return false; // implies error?
-    }
-    public void showMessage(String message){
-      printMessage("ssh show message: " + message);
-    }
-
-  }
 
 }

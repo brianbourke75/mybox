@@ -82,13 +82,15 @@ public class ServerClientConnection extends Thread {
         String fileName = ByteStream.toString(inStream);
         String fileTimeString = ByteStream.toString(inStream);
 
-        //System.out.println(fileTimeString);
-        
+        // TODO: create underlying directory if the file needs it
+
         long fileTime = Long.valueOf(fileTimeString);
         System.out.println("getting file: " + fileName + " modtime " + fileTime);
         File file=new File(localDir + "/" + fileName);
         ByteStream.toFile(inStream, file);
         file.setLastModified(fileTime);
+
+        parent.spanCatchupOperation(handle, account.id, input, fileName);
       }
       catch (Exception e){
         System.out.println("c2s operation failed: " + e.getMessage());
@@ -105,29 +107,47 @@ public class ServerClientConnection extends Thread {
       } catch (Exception e) {
         System.out.println("clientWants operation failed: " + e.getMessage());
       }
-    } else if (input.equals("deleteOnServer")) {
+    } else if (input.equals("deleteOnServer")) {  // handles files and directories
       try {
         String fileName = ByteStream.toString(inStream);
-        System.out.println("client requesting deletion on server: " + fileName);
-        File file = new File(localDir + "/" + fileName);
-        if (file.exists()) {
-          file.delete();
-        }
+        System.out.println("client requested deletion on server: " + fileName);
+        File item = new File(localDir + "/" + fileName);
+        if (item.isDirectory())
+          Common.deleteLocalDirectory(item);
+        else if(item.exists())  // assume it is a file
+          item.delete();
+        else
+          System.out.println("unable to find item on server to delete");
+
+        parent.spanCatchupOperation(handle, account.id, input, fileName);
       } catch (Exception e) {
         System.out.println("deleteOnServer operation failed: " + e.getMessage());
       }
-    } else if (input.equals("renameOnServer")) {
+    } else if (input.equals("renameOnServer")) {  // handles files and directories
       try {
         String oldName = ByteStream.toString(inStream);
         String newName = ByteStream.toString(inStream);
-        System.out.println("client requesting rename on server: " + oldName + " to " + newName);
+        System.out.println("client requested rename on server: " + oldName + " to " + newName);
         File oldFile = new File(localDir + "/" + oldName);
         File newFile = new File(localDir + "/" + newName);
         if (oldFile.exists()) {
           oldFile.renameTo(newFile);
         }
+
+        parent.spanCatchupOperation(handle, account.id, input, oldName + " ->" + newName);
+
       } catch (Exception e) {
-        System.out.println("deleteOnServer operation failed: " + e.getMessage());
+        System.out.println("renameOnServer operation failed: " + e.getMessage());
+      }
+    } else if (input.equals("createDirectoryOnServer")) {
+      try {
+        String name = ByteStream.toString(inStream);
+        System.out.println("client requesting create directory on server: " + name);
+        Common.createLocalDirectory(localDir + "/" + name);
+
+        parent.spanCatchupOperation(handle, account.id, input, name);
+      } catch (Exception e) {
+        System.out.println("createDirectoryOnServer operation failed: " + e.getMessage());
       }
     } else if (input.equals("requestServerFileList")) {
       sendServerFileList();
@@ -151,11 +171,11 @@ public class ServerClientConnection extends Thread {
           jsonOut.put("status", "success");
           jsonOut.put("quota", account.quota);
           jsonOut.put("salt", account.salt);
-          //send("attachaccount_response " + jsonOut);
+
+          parent.updateMultiMap(account.id, handle);
         } else {
           jsonOut.put("status", "failed");
           jsonOut.put("error", "invalid account");
-          //send("attachaccount_response " + jsonOut);
         }
 
         try {
@@ -176,29 +196,75 @@ public class ServerClientConnection extends Thread {
   }
 
 
+  /**
+   * 
+   * @param operation is the original command from the master client
+   * @param arg
+   */
+  public void sendCatchup(String operation, String arg) {
+    // TODO: handle file transfers
+    
+    if (operation.equals("c2s")) {
+      try {
+        System.out.println("catchup s2c to client ("+ handle + "): " + arg);
+        
+        File localFile = new File(localDir + "/" + arg);
+        if (localFile.exists()) {
+          sendCommandToClient("s2c");
+          ByteStream.toStream(outStream, arg);
+          ByteStream.toStream(outStream, localFile.lastModified() + "");
+          ByteStream.toStream(outStream, localFile);
+        }
+        
+      } catch (Exception e) {
+        System.out.println("catchup s2c to client failed: " + e.getMessage());
+      }
+      
+    } else if(operation.equals("deleteOnServer")) {  // handles files and directories?
+      try {
+        System.out.println("catchup delete to client ("+ handle + "): " + arg);
+        sendCommandToClient("deleteOnClient");
+        ByteStream.toStream(outStream, arg);
+      } catch (Exception e) {
+        System.out.println("catchup delete to client failed: " + e.getMessage());
+      }
+    } else if (operation.equals("renameOnServer")) {  // handles files and directories?
+      try {
+        System.out.println("catchup rename to client ("+ handle + "): " + arg);
+//        String[] args = arg.split(" -> ");
+        sendCommandToClient("renameOnClient");
+        ByteStream.toStream(outStream, arg);
+      } catch (Exception e) {
+        System.out.println("catchup rename to client failed: " + e.getMessage());
+      }
+    } else if (operation.equals("createDirectoryOnServer")) {
+      try {
+        System.out.println("catchup createDirectoryOnClient ("+ handle + "): " + arg);
+        sendCommandToClient("catchup createDirectoryOnClient");
+        ByteStream.toStream(outStream, arg);
+      } catch (Exception e) {
+        System.out.println("catchup createDirectoryOnClient failed: " + e.getMessage());
+      }
+    } else {
+      Server.printMessage("unknown command: "+ operation);
+      failedRequestCount++;
+    } 
+    
+  }
+
+
   private void sendServerFileList() {
 
     System.out.println("getting local file list for: " + localDir);
 
     try {
-      // get the local file list
-
-      File thisDir = new File(localDir);
-
-      File[] files = thisDir.listFiles(); // TODO: use some FilenameFilter
-
+      List<MyFile> files = Common.getFileListing(new File(localDir));
+      
       JSONArray jsonArray = new JSONArray();
 
-      for (File thisFile : files) {
-        MyFile myFile = new MyFile(thisFile.getName());
-        myFile.modtime = thisFile.lastModified();
-
-        if (thisFile.isFile())
-          myFile.type = "file";
-        else if (thisFile.isDirectory())
-          myFile.type = "directory";
-
-        jsonArray.add(myFile.serialize());
+      for (MyFile thisFile : files) {
+        System.out.println(" " + thisFile.name);
+        jsonArray.add(thisFile.serialize());
       }
 
       sendCommandToClient("requestServerFileList_response");
@@ -270,10 +336,7 @@ public class ServerClientConnection extends Thread {
   public boolean attachAccount(String email) {
 
     account = parent.serverDb.getAccountByEmail(email);
-
     localDir = account.serverdir;
-
-//    localDir = Server.serverBaseDir + "/" + account.id;
 
     if (account == null) {
       Server.printMessage("Account does not exist " + email); // TODO: return false?

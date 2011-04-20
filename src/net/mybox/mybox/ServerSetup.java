@@ -107,13 +107,13 @@ public class ServerSetup {
 
     // check for the unison command and make sure it can be executed
 
-    File unisonCommand = new File(Server.serverUnisonCommand);
-
-    if (!unisonCommand.exists())
-      return false;
-
-    if (!unisonCommand.canExecute())
-      unisonCommand.setExecutable(true);
+//    File unisonCommand = new File(Server.serverUnisonCommand);
+//
+//    if (!unisonCommand.exists())
+//      return false;
+//
+//    if (!unisonCommand.canExecute())
+//      unisonCommand.setExecutable(true);
 
     return true;
   }

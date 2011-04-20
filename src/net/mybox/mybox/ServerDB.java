@@ -397,8 +397,6 @@ public class ServerDB {
 
     int quota = Server.defaultQuota;
     String serverdir = null;  //not in db
-//    String serverPOSIXaccount = null;  //not in db
-
 
     public Account(String id, String email, String password, String salt, int quota) {
 
@@ -408,8 +406,6 @@ public class ServerDB {
       this.id = id;
       this.email = email;
       this.quota = quota;
-//      serverPOSIXaccount = Server.getServerPOSIXaccountName(id);
-      //serverdir = "/home/" + serverPOSIXaccount + "/Mybox/";  // TODO: set dynamically based on system
 
       this.salt = salt;
       this.password = password;

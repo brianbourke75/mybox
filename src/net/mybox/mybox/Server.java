@@ -26,9 +26,7 @@ import java.io.*;
 import java.net.*;
 import java.util.*;
 import org.apache.commons.io.FileUtils.*;
-import org.json.simple.*;
 import org.apache.commons.cli.*;
-import org.apache.commons.lang.*;
 
 /**
  * The server component of the system is an executable that clients talk to
@@ -38,6 +36,9 @@ public class Server {
   // list of connected clients
   private HashMap<Integer, ServerClientConnection> clients = new HashMap<Integer, ServerClientConnection>();
   
+  // map of userId => set of all connected clients that belong to that user
+  private HashMap<String, HashSet<Integer>> multiClientMap = new HashMap<String, HashSet<Integer>>();
+
   private ServerSocket server = null;
   public static int maxClients = 20;  // defaults
   public static int defaultQuota = 50;  // megabytes
@@ -48,15 +49,24 @@ public class Server {
   public static String defaultDbFile = null;//Common.getAppHome() + "/mybox_server_db.xml";
   public static String defaultConfigFile = null;//Common.getAppHome() + "/mybox_server.conf";
   public static final String logFile = "/tmp/mybox_server.log";
-  
-//  private static final String serverPOSIXacctPrefix = "mbu_";
-  
-  public static String serverUnisonCommand = null;
 
   public static String serverBaseDir = System.getProperty("user.home") + "/mbServerSpace";
 
   static {
     updatePaths();
+  }
+
+  public void updateMultiMap(String id, Integer handle) {
+
+    if (multiClientMap.containsKey(id)) {
+      HashSet<Integer> thisMap = multiClientMap.get(id);
+      thisMap.add(handle);
+      multiClientMap.put(id, thisMap);  // should overwrite the old map
+    } else {
+      HashSet<Integer> thisMap = new HashSet<Integer>();
+      thisMap.add(handle);
+      multiClientMap.put(id, thisMap);
+    }
   }
 
   /**
@@ -65,8 +75,6 @@ public class Server {
   public static void updatePaths() {
     defaultDbFile = Common.getAppHome() + "/mybox_server_db.xml";
     defaultConfigFile = Common.getAppHome() + "/mybox_server.conf";
-    //serverUnisonCommand = Common.getPathToInc() + "/unison-2.40.61-linux_x86";
-    serverUnisonCommand = Common.getPathToInc() + "/unison-2.27.57-linux";
   }
 
 
@@ -105,13 +113,7 @@ public class Server {
     System.out.println(message);
     log(message + "\n");
   }
-/*
-  public static String getServerPOSIXaccountName(String id) {
-    return serverPOSIXacctPrefix + id;
-  }
 
- *
- */
   private void readConfig(String configFile) {
     Properties properties = new Properties();
 
@@ -158,6 +160,28 @@ public class Server {
     } catch (IOException ioe) {
       printErrorExit("Can not bind to port " + port + ": " + ioe.getMessage());
     }
+  }
+
+  /**
+   * Send message to sibling clients to span out needed sync commands.
+   * @param myHandle
+   * @param accountId
+   * @param operation
+   * @param arg
+   */
+  public void spanCatchupOperation(int myHandle, String accountId, String operation, String arg) {
+    
+    HashSet<Integer> thisMap = multiClientMap.get(accountId);
+
+    for (Integer thisHandle : thisMap) {
+      if (thisHandle == myHandle)
+        continue;
+
+      ServerClientConnection client = clients.get(thisHandle);
+
+      client.sendCatchup(operation, arg);
+    }
+
   }
 
 
