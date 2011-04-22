@@ -43,9 +43,7 @@ public class ServerClientConnection extends Thread {
   private DataInputStream dataInStream = null;
   private OutputStream outStream = null;
   private DataOutputStream dataOutStream = null;
-
-
-
+  
   private static LinkedList<MyFile> outQueue = new LinkedList<MyFile>();
 
   private static String localDir = null;
@@ -73,11 +71,11 @@ public class ServerClientConnection extends Thread {
   }
 
 
-  private synchronized void handleInput(String input) {
+  private synchronized void handleInput(Common.Signal input) {
 
-    Server.printMessage("(" + Common.now() + ") Client " + handle + ": " + input);
+    Server.printMessage("(" + Common.now() + ") Client " + handle + ": " + input.toString());
 
-    if (input.equals("c2s")) {
+    if (input == (Common.Signal.c2s)) {
       try {
         String fileName = ByteStream.toString(inStream);
         String fileTimeString = ByteStream.toString(inStream);
@@ -95,7 +93,28 @@ public class ServerClientConnection extends Thread {
       catch (Exception e){
         System.out.println("c2s operation failed: " + e.getMessage());
       }
-    } else if (input.equals("clientWants")) {
+    } else if (input ==(Common.Signal.clientWantsToSend)) {
+      try {
+        String fileName = ByteStream.toString(inStream);
+        String fileTimeString = ByteStream.toString(inStream);
+        long fileTime = Long.valueOf(fileTimeString);
+
+        System.out.println("clientWantsToSend: " + fileName + " modtime " + fileTime);
+        File file=new File(localDir + "/" + fileName);
+
+        sendCommandToClient(Common.Signal.clientWantsToSend_response);
+        ByteStream.toStream(outStream, fileName);
+
+        if (file.isFile() && file.lastModified() == fileTime) {
+          ByteStream.toStream(outStream, "no");
+        } else {
+          ByteStream.toStream(outStream, "yes");
+        }
+      }
+      catch (Exception e){
+        System.out.println("c2s operation failed: " + e.getMessage());
+      }
+    } else if (input == (Common.Signal.clientWants)) {
       try {
         String fileName = ByteStream.toString(inStream);
         System.out.println("client requesting from server: " + fileName);
@@ -107,7 +126,7 @@ public class ServerClientConnection extends Thread {
       } catch (Exception e) {
         System.out.println("clientWants operation failed: " + e.getMessage());
       }
-    } else if (input.equals("deleteOnServer")) {  // handles files and directories
+    } else if (input == (Common.Signal.deleteOnServer)) {  // handles files and directories
       try {
         String fileName = ByteStream.toString(inStream);
         System.out.println("client requested deletion on server: " + fileName);
@@ -123,23 +142,23 @@ public class ServerClientConnection extends Thread {
       } catch (Exception e) {
         System.out.println("deleteOnServer operation failed: " + e.getMessage());
       }
-    } else if (input.equals("renameOnServer")) {  // handles files and directories
+    } else if (input == (Common.Signal.renameOnServer)) {  // handles files and directories
       try {
         String oldName = ByteStream.toString(inStream);
         String newName = ByteStream.toString(inStream);
-        System.out.println("client requested rename on server: " + oldName + " to " + newName);
+        System.out.println("client requested rename on server: (" + oldName + ") to (" + newName + ")");
         File oldFile = new File(localDir + "/" + oldName);
         File newFile = new File(localDir + "/" + newName);
         if (oldFile.exists()) {
           oldFile.renameTo(newFile);
         }
 
-        parent.spanCatchupOperation(handle, account.id, input, oldName + " ->" + newName);
+        parent.spanCatchupOperation(handle, account.id, input, oldName + "->" + newName);
 
       } catch (Exception e) {
         System.out.println("renameOnServer operation failed: " + e.getMessage());
       }
-    } else if (input.equals("createDirectoryOnServer")) {
+    } else if (input == (Common.Signal.createDirectoryOnServer)) {
       try {
         String name = ByteStream.toString(inStream);
         System.out.println("client requesting create directory on server: " + name);
@@ -149,9 +168,9 @@ public class ServerClientConnection extends Thread {
       } catch (Exception e) {
         System.out.println("createDirectoryOnServer operation failed: " + e.getMessage());
       }
-    } else if (input.equals("requestServerFileList")) {
+    } else if (input == (Common.Signal.requestServerFileList)) {
       sendServerFileList();
-    } else if (input.equals("attachaccount")) {
+    } else if (input == (Common.Signal.attachaccount)) {
 
       String args = null;
 
@@ -179,7 +198,7 @@ public class ServerClientConnection extends Thread {
         }
 
         try {
-          sendCommandToClient("attachaccount_response");
+          sendCommandToClient(Common.Signal.attachaccount_response);
           ByteStream.toStream(outStream, jsonOut.toJSONString());
         }
         catch (Exception e) {
@@ -201,16 +220,16 @@ public class ServerClientConnection extends Thread {
    * @param operation is the original command from the master client
    * @param arg
    */
-  public void sendCatchup(String operation, String arg) {
+  public void sendCatchup(Common.Signal operation, String arg) {
     // TODO: handle file transfers
     
-    if (operation.equals("c2s")) {
+    if (operation == (Common.Signal.c2s)) {
       try {
         System.out.println("catchup s2c to client ("+ handle + "): " + arg);
         
         File localFile = new File(localDir + "/" + arg);
         if (localFile.exists()) {
-          sendCommandToClient("s2c");
+          sendCommandToClient(Common.Signal.s2c);
           ByteStream.toStream(outStream, arg);
           ByteStream.toStream(outStream, localFile.lastModified() + "");
           ByteStream.toStream(outStream, localFile);
@@ -220,27 +239,27 @@ public class ServerClientConnection extends Thread {
         System.out.println("catchup s2c to client failed: " + e.getMessage());
       }
       
-    } else if(operation.equals("deleteOnServer")) {  // handles files and directories?
+    } else if (operation == (Common.Signal.deleteOnServer)) {  // handles files and directories?
       try {
         System.out.println("catchup delete to client ("+ handle + "): " + arg);
-        sendCommandToClient("deleteOnClient");
+        sendCommandToClient(Common.Signal.deleteOnClient);
         ByteStream.toStream(outStream, arg);
       } catch (Exception e) {
         System.out.println("catchup delete to client failed: " + e.getMessage());
       }
-    } else if (operation.equals("renameOnServer")) {  // handles files and directories?
+    } else if (operation == (Common.Signal.renameOnServer)) {  // handles files and directories?
       try {
         System.out.println("catchup rename to client ("+ handle + "): " + arg);
 //        String[] args = arg.split(" -> ");
-        sendCommandToClient("renameOnClient");
+        sendCommandToClient(Common.Signal.renameOnClient);
         ByteStream.toStream(outStream, arg);
       } catch (Exception e) {
         System.out.println("catchup rename to client failed: " + e.getMessage());
       }
-    } else if (operation.equals("createDirectoryOnServer")) {
+    } else if (operation == (Common.Signal.createDirectoryOnServer)) {
       try {
         System.out.println("catchup createDirectoryOnClient ("+ handle + "): " + arg);
-        sendCommandToClient("catchup createDirectoryOnClient");
+        sendCommandToClient(Common.Signal.createDirectoryOnClient);
         ByteStream.toStream(outStream, arg);
       } catch (Exception e) {
         System.out.println("catchup createDirectoryOnClient failed: " + e.getMessage());
@@ -267,7 +286,7 @@ public class ServerClientConnection extends Thread {
         jsonArray.add(thisFile.serialize());
       }
 
-      sendCommandToClient("requestServerFileList_response");
+      sendCommandToClient(Common.Signal.requestServerFileList_response);
       ByteStream.toStream(outStream, jsonArray.toJSONString());
 
       System.out.println("local file list: " + jsonArray.size() + " files");
@@ -285,7 +304,7 @@ public class ServerClientConnection extends Thread {
     File fileObj = new File(localDir + "/" + myFile.name);
 
     try {
-      sendCommandToClient(myFile.action);
+      sendCommandToClient(Common.Signal.s2c); //myFile.action
       ByteStream.toStream(outStream, myFile.name);
       ByteStream.toStream(outStream, fileObj.lastModified() + "");
       ByteStream.toStream(outStream, fileObj);
@@ -316,7 +335,7 @@ public class ServerClientConnection extends Thread {
         while (true) {
           try {
             System.out.println("Thread waiting to readUTF");
-            handleInput(dataInStream.readUTF());
+            handleInput(Common.Signal.get(dataInStream.readByte()));
           } catch (IOException ioe) {
             System.out.println("Client disconnected");
             // assume this happens because the client socket disconnected
@@ -349,9 +368,10 @@ public class ServerClientConnection extends Thread {
   }
 
 
-  public void sendCommandToClient(String command) {
+  public void sendCommandToClient(Common.Signal signal) {
     try {
-      dataOutStream.writeUTF(command);
+      dataOutStream.writeByte(signal.index());
+//      dataOutStream.writeUTF(command);
     //  dataOutStream.flush();
     } catch (IOException ioe) {
       Server.printMessage(handle + " ERROR sending: " + ioe.getMessage());

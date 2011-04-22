@@ -36,6 +36,46 @@ import org.apache.commons.codec.binary.Base64;
  */
 public class Common {
 
+  /**
+   * Signal commands that are made over the network
+   */
+  public enum Signal {
+
+    c2s ((byte)0),
+    clientWantsToSend ((byte)1),
+    clientWantsToSend_response ((byte)2),
+    clientWants ((byte)3),
+    deleteOnServer ((byte)4),
+    renameOnServer ((byte)5),
+    createDirectoryOnServer ((byte)6),
+    requestServerFileList ((byte)7),
+    requestServerFileList_response ((byte)8),
+    attachaccount ((byte)9),
+    attachaccount_response ((byte)10),
+    s2c ((byte)11),
+    deleteOnClient ((byte)12),
+    renameOnClient ((byte)13),
+    createDirectoryOnClient ((byte)14),
+    yes ((byte)15),
+    no ((byte)16);
+
+    private final byte index;
+
+    Signal(byte index) {
+        this.index = index;
+    }
+
+    public byte index() {
+        return index;
+    }
+
+    public static Signal get(byte b) {
+      return Signal.values()[b];
+    }
+
+
+  }
+
   public static int defaultCommunicationPort = 4444;
   public static final String appVersion = "0.1.0";
 

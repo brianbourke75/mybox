@@ -50,7 +50,7 @@ public class Client {
   private GatherDirectoryUpdates gatherDirectoryUpdatesThread = null;
   private boolean waiting = false;
   public static Object clientGui = null;
-  private String lastReceivedOperation = null;
+  private Common.Signal lastReceivedOperation = null;
 
   // user settings
   private ClientAccount account = new ClientAccount();
@@ -86,8 +86,8 @@ public class Client {
   public LinkedList<MyFile> outQueue = new LinkedList<MyFile>();
   
   // filenames that are expected to be recieved. removed once that are finished downloading
-  public Set<String> incoming = new HashSet<String>();
-  public String ignoreUpdatesTo = null;
+//  public Set<String> incoming = new HashSet<String>();
+//  public String ignoreUpdatesTo = null;
 
   private long lastSync = 0;
 
@@ -141,16 +141,16 @@ public class Client {
   }
 
 
-  private synchronized void handleInput(String operation) {
+  private synchronized void handleInput(Common.Signal operation) {
 
-    System.out.println("input operation: " + operation);
+    System.out.println("input operation: " + operation.toString());
 
-    if (operation.equals("s2c")) {
+    if (operation.equals(Common.Signal.s2c)) {
       try {
         String file_name = ByteStream.toString(inStream);
 
-        ignoreUpdatesTo = localDir +"/" + file_name;
-        System.out.println("Setting ignoreUpdatesTo: " + ignoreUpdatesTo);
+//        ignoreUpdatesTo = localDir +"/" + file_name;
+//        System.out.println("Setting ignoreUpdatesTo: " + ignoreUpdatesTo);
 
         String fileTimeString = ByteStream.toString(inStream);
 
@@ -159,7 +159,6 @@ public class Client {
         System.out.println("getting file: " + file_name);
 
         File existingFile = new File(localDir +"/" + file_name);
-
 
         if (existingFile.isFile() && existingFile.lastModified() == fileTime) {
           // very crappy hack until I can figure a way around this
@@ -175,17 +174,17 @@ public class Client {
           file.setLastModified(fileTime);
           
         }
-        incoming.remove(file_name);
-        for (String in : incoming)  System.out.print("  " + in);
+//        incoming.remove(file_name);
+//        for (String in : incoming)  System.out.print("  " + in);
 
-        System.out.println("Removing ignoreUpdatesTo: " + ignoreUpdatesTo);
-        ignoreUpdatesTo = null;
+//        System.out.println("Removing ignoreUpdatesTo: " + ignoreUpdatesTo);
+//        ignoreUpdatesTo = null;
 
       }
       catch (Exception e){
         System.out.println("Operation failed: " + e.getMessage());
       }
-    } else if (operation.equals("deleteOnClient")) {  // catchup operation
+    } else if (operation.equals(Common.Signal.deleteOnClient)) {  // catchup operation
       try {
         String name = ByteStream.toString(inStream);
 //        System.out.println("deleting local file: " + name);
@@ -196,12 +195,12 @@ public class Client {
         System.out.println("Operation failed: " + e.getMessage());
       }
 
-    }
-    else if (operation.equals("renameOnClient")) {  // catchup operation
+    } else if (operation.equals(Common.Signal.renameOnClient)) {  // catchup operation
       try {
         String arg = ByteStream.toString(inStream);
-        String[] args = arg.split(" -> ");
-        Common.renameLocal(localDir +"/"+ args[0], localDir +"/"+ args[2]);
+        String[] args = arg.split("->");
+        System.out.println("rename: " + args[0] + " to " + args[1]);
+        Common.renameLocal(localDir +"/"+ args[0], localDir +"/"+ args[1]);
 //        System.out.println("rename local file: " + args[0] + " to " + args[1]);
         //renameOnServer(logFileName, arg);
 //        incoming.remove(file_name);
@@ -210,8 +209,7 @@ public class Client {
         System.out.println("Operation failed: " + e.getMessage());
       }
 
-    }
-    else if (operation.equals("createDirectoryOnClient")) {  // catchup operation
+    } else if (operation.equals(Common.Signal.createDirectoryOnClient)) {  // catchup operation
       try {
         String name = ByteStream.toString(inStream);
         //System.out.println("create local directory: " + name);
@@ -223,10 +221,23 @@ public class Client {
         System.out.println("Operation failed: " + e.getMessage());
       }
 
-    }
+    } else if (operation.equals(Common.Signal.clientWantsToSend_response)) {
+      try {
+        String name = ByteStream.toString(inStream);
+        String response = ByteStream.toString(inStream);
 
+        System.out.println("clientWantsToSend_response: " + name + " = " + response);
 
-    else if (operation.equals("requestServerFileList_response")) {
+        if (response.equals("yes")) {
+          outQueue.push(new MyFile(name));
+          checkQueue();
+        }
+      }
+      catch (Exception e){
+        System.out.println("Operation failed: " + e.getMessage());
+      }
+
+    } else if (operation.equals(Common.Signal.requestServerFileList_response)) {
 
       try {
         String jsonString = ByteStream.toString(inStream);
@@ -235,7 +246,7 @@ public class Client {
       } catch (Exception e) {
         System.out.println("Exception while recieving jsonArray");
       }
-    } else if (operation.equals("attachaccount_response")) {
+    } else if (operation.equals(Common.Signal.attachaccount_response)) {
 
       String jsonString = null;
       
@@ -260,7 +271,7 @@ public class Client {
 
     }
     else {
-      printMessage("unknown command from server");
+      printMessage("unknown command from server (" + operation +")");
     }
     
     //if (command.endsWith("_response")) 
@@ -318,7 +329,7 @@ public class Client {
     File fileObj = new File(localDir + "/" + myFile.name);
 
     try {
-      sendCommandToServer("c2s");
+      sendCommandToServer(Common.Signal.c2s);
       ByteStream.toStream(outStream, myFile.name);
       ByteStream.toStream(outStream, fileObj.lastModified() +"");
       ByteStream.toStream(outStream, fileObj);
@@ -337,7 +348,7 @@ public class Client {
     System.out.println("Telling server to delete item " + name);
 
     try{
-      sendCommandToServer("deleteOnServer");
+      sendCommandToServer(Common.Signal.deleteOnServer);
       ByteStream.toStream(outStream, name);
     } catch (Exception e) {
       System.out.println("error requesting server item delete");
@@ -348,7 +359,7 @@ public class Client {
     System.out.println("Telling server to rename file " + oldName + " to " + newName);
 
     try{
-      sendCommandToServer("renameOnServer");
+      sendCommandToServer(Common.Signal.renameOnServer);
       ByteStream.toStream(outStream, oldName);
       ByteStream.toStream(outStream, newName);
     } catch (Exception e) {
@@ -361,7 +372,7 @@ public class Client {
     System.out.println("Telling server to create directory " + name);
 
     try{
-      sendCommandToServer("createDirectoryOnServer");
+      sendCommandToServer(Common.Signal.createDirectoryOnServer);
       ByteStream.toStream(outStream, name);
 //      ByteStream.toStream(outStream, ((new File(name)).lastModified()) +"");
     } catch (Exception e) {
@@ -373,10 +384,10 @@ public class Client {
     System.out.println("Requesting file " + name);
 
     try{
-      sendCommandToServer("clientWants");
+      sendCommandToServer(Common.Signal.clientWants);
       ByteStream.toStream(outStream, name);
-      incoming.add(name);
-      for (String in : incoming)  System.out.println("  " + in);
+      //incoming.add(name);
+      //for (String in : incoming)  System.out.println("  " + in);
     } catch (Exception e) {
       System.out.println("error requesting file");
     }
@@ -423,7 +434,7 @@ public class Client {
         while (true) {
           try {
             System.out.println("Client waiting for command");
-            handleInput(dataInStream.readUTF());
+            handleInput(Common.Signal.get( dataInStream.readByte() ));
           } catch (IOException ioe) {
             System.out.println("Listening error in ClientInThread: " + ioe.getMessage());
             clientInputListenerThread = null;
@@ -452,36 +463,46 @@ public class Client {
     
     for (String fname : Cgather.keySet()) {
       if (Cgather.get(fname).equals("renamed")) {
-        String[] names = fname.split(" -> ");
+        String[] names = fname.split("->");
         renameOnServer(names[0], names[1]);
       } else if (Cgather.get(fname).equals("deleted")) {
         deleteOnServer(fname);
       } else if (Cgather.get(fname).equals("modified") || Cgather.get(fname).equals("created")) {
 
-        if (incoming.contains(fname)) {
+        /*if (incoming.contains(fname)) {
           System.out.println("Ignoring update to " + fname + " since it seems to have come from server");
         }
         else if (ignoreUpdatesTo != null && ignoreUpdatesTo.equals(localDir + "/" + fname)) {
           System.out.println("Ignoring update to " + fname);
         }
-        else {
+        else*/ {
           if ((new File(localDir + "/" + fname)).isDirectory()) {
             System.out.println(fname + " is a directory so it will be created on the server");
             createDirectoryOnServer(fname);
           }
           else {
-            outQueue.addFirst(new MyFile(fname, 0, "file"));
+//            outQueue.addFirst(new MyFile(fname, 0, "file"));
+            
+            try {
+              System.out.println("clientWantsToSend "+ fname);
+              sendCommandToServer(Common.Signal.clientWantsToSend);
+              ByteStream.toStream(outStream, fname);
+              ByteStream.toStream(outStream, (new File(localDir + "/" + fname)).lastModified() +"");
+            } catch (Exception e) {
+              //
+            }
+
           }
         }
         
       }
     }
     
-    checkQueue();
+//    checkQueue();
 
     updateLastSync();
 
-    System.out.println("Setting lasySync to " + lastSync);
+    System.out.println("Setting lasySync to " + lastSync); // actually, it is not done until all incoming finish
 
     Cgather.clear();
 
@@ -507,7 +528,8 @@ public class Client {
     // TODO: update all time comparisons to respect server/client time differences
 
     populateLocalFileList();
-    boolean listReturned = serverDiscussion("requestServerFileList", null);
+    boolean listReturned = serverDiscussion(Common.Signal.requestServerFileList
+            , Common.Signal.requestServerFileList_response, null);
 
     System.out.println("comparing C=" + C.size() + " to S="+ S.size());
 
@@ -579,11 +601,11 @@ public class Client {
     System.out.println("SendToServer");
     for (MyFile item : SendToServer) {
 
-      if (incoming.contains(item.name)) {
+      /*if (incoming.contains(item.name)) {
         System.out.println("Ignoring update to " + item.name + " since it seems to have come from server");
       } else if (ignoreUpdatesTo != null && ignoreUpdatesTo.equals(localDir + "/" + item.name)) {
         System.out.println("Ignoring update to " + item.name);
-      } else {
+      } else*/ {
         outQueue.addFirst(item);
         System.out.println(item);
       }
@@ -606,7 +628,6 @@ public class Client {
 
     setStatus(ClientStatus.READY);
   }
-
 
 
 
@@ -795,12 +816,13 @@ public class Client {
    * Send a message to the server
    * @param command
    */
-  public void sendCommandToServer(String command) {
+  public void sendCommandToServer(Common.Signal signal) {
     try {
-      dataOutStream.writeUTF(command);
+      dataOutStream.writeByte(signal.index());
+      //dataOutStream.writeUTF(signal);
       //dataOutStream.flush();
     } catch (Exception e) {
-      printWarning("Sending error for ("+ command +"): " + e.getMessage());
+      printWarning("Sending error for ("+ signal.toString() +"): " + e.getMessage());
     }
   }
 
@@ -893,24 +915,25 @@ public class Client {
    * @param messageToServer
    * @return false if no response
    */
-  public boolean serverDiscussion(String messageToServer, String argument) {
+  public boolean serverDiscussion(Common.Signal messageToServer, Common.Signal expectedReturnCommand, String argument) {
 
     int pollseconds = 1;
     int pollcount = 10;
 
-    String expectedReturnCommand = messageToServer + "_response";  //iArgs[0] + "_response";
+    //String expectedReturnCommand = messageToServer + "_response";  //iArgs[0] + "_response";
 
-    System.out.println("serverDiscussion starting with expected return: " + expectedReturnCommand);
-    System.out.println("serverDiscussion sending message to server: " + messageToServer);
+    System.out.println("serverDiscussion starting with expected return: " + expectedReturnCommand.toString());
+    System.out.println("serverDiscussion sending message to server: " + messageToServer.toString());
 
     sendCommandToServer(messageToServer);
-    if (argument != null)
+    if (argument != null) {
       try {
         ByteStream.toStream(outStream, argument);
       }
       catch (Exception e) {
         //
       }
+    }
 
     for (int i=0; i<pollcount; i++){
       try{Thread.sleep(pollseconds * 1000);}catch(Exception ee){}
@@ -966,17 +989,14 @@ public class Client {
 
     startClientInputListenerThread();
 
-    
-//    client = new ClientServerReceiver(this, serverConnectionSocket);
-
     JSONObject jsonOut = new JSONObject();
     jsonOut.put("email", account.email);
-
 //    jsonOut.put("password", password);
     
     // TODO: make sure if the attachAccount fails, no files can be transfered
     
-    if (!serverDiscussion("attachaccount", jsonOut.toString()))
+    if (!serverDiscussion(Common.Signal.attachaccount,
+            Common.Signal.attachaccount_response, jsonOut.toString()))
       printErrorExit("Unable to attach account");
 
     // checking that the mybox versions are the same happens in handleMessageFromServer

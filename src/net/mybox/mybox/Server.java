@@ -169,8 +169,10 @@ public class Server {
    * @param operation
    * @param arg
    */
-  public void spanCatchupOperation(int myHandle, String accountId, String operation, String arg) {
-    
+  public void spanCatchupOperation(int myHandle, String accountId, Common.Signal operation, String arg) {
+
+    System.out.println("spanCatchupOperation from " + myHandle + " to all " + accountId + " (" + operation.toString() +","+ arg +")");
+
     HashSet<Integer> thisMap = multiClientMap.get(accountId);
 
     for (Integer thisHandle : thisMap) {

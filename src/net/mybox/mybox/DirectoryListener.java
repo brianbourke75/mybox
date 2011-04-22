@@ -42,7 +42,7 @@ public class DirectoryListener {
     @Override
       public void fileRenamed(int wd, String rootPath, String oldName, String newName) {
 //        client.directoryUpdate("renamed " + rootPath + " : " + oldName + " -> " + newName);
-        client.directoryUpdate("renamed", oldName + " -> " + newName);
+        client.directoryUpdate("renamed", oldName + "->" + newName);
       }
 
     @Override
