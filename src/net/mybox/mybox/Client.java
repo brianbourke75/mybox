@@ -21,7 +21,6 @@
 
 package net.mybox.mybox;
 
-import com.jcraft.jsch.*;
 import java.io.*;
 import java.net.*;
 import java.util.*;
@@ -52,18 +51,16 @@ public class Client {
   public static Object clientGui = null;
   private Common.Signal lastReceivedOperation = null;
 
+  private OutputStream outStream = null;
+  private DataOutputStream dataOutStream = null;
+  private InputStream inStream = null;
+  private DataInputStream dataInStream = null;
+  
   // user settings
   private ClientAccount account = new ClientAccount();
 
-  // static system specific settings
-//  private final String ServerDir = "Mybox";
-  
-  // data directory
   public static final String defaultClientDir = System.getProperty("user.home") + "/Mybox";
   public static final String defaultConfigDir = System.getProperty("user.home") + "/.mybox";
-//  public static final String defaultConfigFile = defaultConfigDir + "/mybox_client.conf";
-//  public static final String logFile = defaultConfigDir + "/mybox_client.log";
-//  public static final String lastSyncFile = defaultConfigDir + "/lasysync.txt";
 
   public static final String configFileName = "mybox_client.conf";
   public static final String logFileName = "mybox_client.log";
@@ -73,32 +70,19 @@ public class Client {
   public static String logFile = null;
   public static String lastSyncFile = null;
   
-
   private static String localDir = null;  // data directory
-
-  private OutputStream outStream = null;
-  private DataOutputStream dataOutStream = null;
-  private InputStream inStream = null;
-  private DataInputStream dataInStream = null;
 
   // TODO: make this a list of only name=>action items instead of myfiles
   // actually queue should eventually only be a list of files to send
   public LinkedList<MyFile> outQueue = new LinkedList<MyFile>();
   
-  // filenames that are expected to be recieved. removed once that are finished downloading
-//  public Set<String> incoming = new HashSet<String>();
-//  public String ignoreUpdatesTo = null;
-
   private long lastSync = 0;
 
-  // serverFileList
-  public HashMap<String, MyFile> S = new HashMap<String, MyFile>();
-  // clientFileList
-  public HashMap<String, MyFile> C = new HashMap<String, MyFile>();
+  public HashMap<String, MyFile> S = new HashMap<String, MyFile>();  // serverFileList
+  public HashMap<String, MyFile> C = new HashMap<String, MyFile>();  // clientFileList
 
   // filename(s) => actions
   public HashMap<String, String> Cgather = new HashMap<String, String>();
-
 
 
   static {
@@ -141,87 +125,56 @@ public class Client {
   }
 
 
-  private synchronized void handleInput(Common.Signal operation) {
+  private void handleInput(Common.Signal operation) {
 
     System.out.println("input operation: " + operation.toString());
 
-    if (operation.equals(Common.Signal.s2c)) {
+    if (operation == Common.Signal.s2c) {
       try {
         String file_name = ByteStream.toString(inStream);
-
-//        ignoreUpdatesTo = localDir +"/" + file_name;
-//        System.out.println("Setting ignoreUpdatesTo: " + ignoreUpdatesTo);
-
         String fileTimeString = ByteStream.toString(inStream);
-
         long fileTime = Long.valueOf(fileTimeString);
 
         System.out.println("getting file: " + file_name);
 
-        File existingFile = new File(localDir +"/" + file_name);
-
-        if (existingFile.isFile() && existingFile.lastModified() == fileTime) {
-          // very crappy hack until I can figure a way around this
-          System.out.println("incoming matches existing file, running to to null");
-          
-          File file=new File("/tmp/incomingDummy");
-          ByteStream.toFile(inStream, file);
-          
-        } else {
-
-          File file=new File(localDir + "/" + file_name);
-          ByteStream.toFile(inStream, file);
-          file.setLastModified(fileTime);
-          
-        }
-//        incoming.remove(file_name);
-//        for (String in : incoming)  System.out.print("  " + in);
-
-//        System.out.println("Removing ignoreUpdatesTo: " + ignoreUpdatesTo);
-//        ignoreUpdatesTo = null;
+        File file=new File(localDir + "/" + file_name);
+        ByteStream.toFile(inStream, file);
+        file.setLastModified(fileTime);
 
       }
       catch (Exception e){
         System.out.println("Operation failed: " + e.getMessage());
       }
-    } else if (operation.equals(Common.Signal.deleteOnClient)) {  // catchup operation
+    } else if (operation == Common.Signal.deleteOnClient) {  // catchup operation
       try {
         String name = ByteStream.toString(inStream);
-//        System.out.println("deleting local file: " + name);
         Common.deleteLocal(localDir +"/"+ name);  // should assess return value
-//        incoming.remove(file_name);
       }
       catch (Exception e){
         System.out.println("Operation failed: " + e.getMessage());
       }
 
-    } else if (operation.equals(Common.Signal.renameOnClient)) {  // catchup operation
+    } else if (operation == Common.Signal.renameOnClient) {  // catchup operation
       try {
         String arg = ByteStream.toString(inStream);
         String[] args = arg.split("->");
         System.out.println("rename: " + args[0] + " to " + args[1]);
         Common.renameLocal(localDir +"/"+ args[0], localDir +"/"+ args[1]);
-//        System.out.println("rename local file: " + args[0] + " to " + args[1]);
-        //renameOnServer(logFileName, arg);
-//        incoming.remove(file_name);
       }
       catch (Exception e){
         System.out.println("Operation failed: " + e.getMessage());
       }
 
-    } else if (operation.equals(Common.Signal.createDirectoryOnClient)) {  // catchup operation
+    } else if (operation == Common.Signal.createDirectoryOnClient) {  // catchup operation
       try {
         String name = ByteStream.toString(inStream);
-        //System.out.println("create local directory: " + name);
         Common.createLocalDirectory(localDir +"/"+ name);
-
-//        incoming.remove(file_name);
       }
       catch (Exception e){
         System.out.println("Operation failed: " + e.getMessage());
       }
 
-    } else if (operation.equals(Common.Signal.clientWantsToSend_response)) {
+    } else if (operation == Common.Signal.clientWantsToSend_response) {
       try {
         String name = ByteStream.toString(inStream);
         String response = ByteStream.toString(inStream);
@@ -237,7 +190,7 @@ public class Client {
         System.out.println("Operation failed: " + e.getMessage());
       }
 
-    } else if (operation.equals(Common.Signal.requestServerFileList_response)) {
+    } else if (operation == Common.Signal.requestServerFileList_response) {
 
       try {
         String jsonString = ByteStream.toString(inStream);
@@ -246,7 +199,7 @@ public class Client {
       } catch (Exception e) {
         System.out.println("Exception while recieving jsonArray");
       }
-    } else if (operation.equals(Common.Signal.attachaccount_response)) {
+    } else if (operation == Common.Signal.attachaccount_response) {
 
       String jsonString = null;
       
@@ -273,14 +226,15 @@ public class Client {
     else {
       printMessage("unknown command from server (" + operation +")");
     }
-    
-    //if (command.endsWith("_response")) 
-    //  receivedResponseCommand = command;
 
     lastReceivedOperation = operation;
   }
 
-
+  /**
+   * Decode a JSON string array into a Hash file list
+   * @param input
+   * @return
+   */
   public static HashMap<String, MyFile> decodeFileList(String input) {
 
     HashMap<String, MyFile> result = new HashMap<String, MyFile>();
@@ -314,6 +268,9 @@ public class Client {
     return result;
   }
 
+  /**
+   * Check the outgoing queue and send files from it, if it is unempty
+   */
   public synchronized void checkQueue() {
 
     if (outQueue.size() > 0) {
@@ -322,7 +279,7 @@ public class Client {
     }
   }
 
-  private void sendFile(MyFile myFile) {
+  private synchronized void sendFile(MyFile myFile) {
 
     System.out.println("sending file " + myFile.name);
 
@@ -343,7 +300,7 @@ public class Client {
    * Delete an item on the server. A file or directory.
    * @param name
    */
-  private void deleteOnServer(String name) {
+  private synchronized void deleteOnServer(String name) {
 
     System.out.println("Telling server to delete item " + name);
 
@@ -355,7 +312,7 @@ public class Client {
     }
   }
   
-  private void renameOnServer(String oldName, String newName) {
+  private synchronized void renameOnServer(String oldName, String newName) {
     System.out.println("Telling server to rename file " + oldName + " to " + newName);
 
     try{
@@ -368,26 +325,23 @@ public class Client {
   }
 
 
-  private void createDirectoryOnServer(String name) {
+  private synchronized void createDirectoryOnServer(String name) {
     System.out.println("Telling server to create directory " + name);
 
     try{
       sendCommandToServer(Common.Signal.createDirectoryOnServer);
       ByteStream.toStream(outStream, name);
-//      ByteStream.toStream(outStream, ((new File(name)).lastModified()) +"");
     } catch (Exception e) {
       System.out.println("error requesting server directory create");
     }
   }
 
-  private void requestFile(String name) {
+  private synchronized void requestFile(String name) {
     System.out.println("Requesting file " + name);
 
     try{
       sendCommandToServer(Common.Signal.clientWants);
       ByteStream.toStream(outStream, name);
-      //incoming.add(name);
-      //for (String in : incoming)  System.out.println("  " + in);
     } catch (Exception e) {
       System.out.println("error requesting file");
     }
@@ -419,8 +373,10 @@ public class Client {
   }
 
 
+  /**
+   * Start a new thread for getting input from the server
+   */
   private void startClientInputListenerThread() {
-    // start a new thread for getting input from the server (anonymous ClientInThread)
 
     //if (clientInputListenerThread != null)
     //  return;
@@ -450,13 +406,11 @@ public class Client {
   }
 
 
-  private void GatherSync() {
-
-    // Cgather: name(s) => action
+  /**
+   * This is the sync method that is used when the client is already running.
+   */
+  private synchronized void GatherSync() {
     
-    //printMessage("disabling listener");
-    //disableDirListener();
-
     setStatus(ClientStatus.SYNCING);
 
     printMessage("Gather sync started  " + Common.now() );
@@ -469,52 +423,39 @@ public class Client {
         deleteOnServer(fname);
       } else if (Cgather.get(fname).equals("modified") || Cgather.get(fname).equals("created")) {
 
-        /*if (incoming.contains(fname)) {
-          System.out.println("Ignoring update to " + fname + " since it seems to have come from server");
+         
+        if ((new File(localDir + "/" + fname)).isDirectory()) {
+          System.out.println(fname + " is a directory so it will be created on the server");
+          createDirectoryOnServer(fname);
         }
-        else if (ignoreUpdatesTo != null && ignoreUpdatesTo.equals(localDir + "/" + fname)) {
-          System.out.println("Ignoring update to " + fname);
-        }
-        else*/ {
-          if ((new File(localDir + "/" + fname)).isDirectory()) {
-            System.out.println(fname + " is a directory so it will be created on the server");
-            createDirectoryOnServer(fname);
-          }
-          else {
-//            outQueue.addFirst(new MyFile(fname, 0, "file"));
-            
-            try {
-              System.out.println("clientWantsToSend "+ fname);
-              sendCommandToServer(Common.Signal.clientWantsToSend);
-              ByteStream.toStream(outStream, fname);
-              ByteStream.toStream(outStream, (new File(localDir + "/" + fname)).lastModified() +"");
-            } catch (Exception e) {
-              //
-            }
+        else {
 
+          try {
+            System.out.println("clientWantsToSend "+ fname);
+            sendCommandToServer(Common.Signal.clientWantsToSend);
+            ByteStream.toStream(outStream, fname);
+            ByteStream.toStream(outStream, (new File(localDir + "/" + fname)).lastModified() +"");
+          } catch (Exception e) {
+            //
           }
         }
         
+        
       }
     }
-    
-//    checkQueue();
 
     updateLastSync();
 
     System.out.println("Setting lasySync to " + lastSync); // actually, it is not done until all incoming finish
 
     Cgather.clear();
-
-    //printMessage("enableing listener since sync is done");
-    //enableDirListener();
       
     printMessage("Sync finished " + Common.now() );
 
     setStatus(ClientStatus.READY);
   }
 
-  public void FullSync() {
+  public synchronized void FullSync() {
 
     printMessage("disabling listener");
     disableDirListener(); // hack while incoming set gets figured out
@@ -524,12 +465,15 @@ public class Client {
     printMessage("Full sync started  " + Common.now() );
 
     // TODO: if lastSysc is 0 or bogus, favoror file creations over deletions
-
     // TODO: update all time comparisons to respect server/client time differences
 
     populateLocalFileList();
-    boolean listReturned = serverDiscussion(Common.Signal.requestServerFileList
-            , Common.Signal.requestServerFileList_response, null);
+    boolean listReturned = serverDiscussion(Common.Signal.requestServerFileList,
+            Common.Signal.requestServerFileList_response, null);
+
+    if (!listReturned) {
+      printErrorExit("requestServerFileList did not return in time");
+    }
 
     System.out.println("comparing C=" + C.size() + " to S="+ S.size());
 
@@ -544,10 +488,11 @@ public class Client {
       if (S.containsKey(name)) {
         MyFile s = S.get(name);
 
-        System.out.println(name + " "+lastSync+" c.modtime=" + c.modtime + " s.modtime=" + s.modtime);
-
         // if it is not a directory and the times are different, compare times
         if (!(new File(localDir + "/" + name)).isDirectory() && c.modtime != s.modtime) {
+          
+          System.out.println(name + " "+lastSync+" c.modtime=" + c.modtime + " s.modtime=" + s.modtime);
+          
           if (c.modtime > lastSync) {
             if (s.modtime > lastSync) {
               System.out.println(name + " = conflict type 1");
@@ -600,21 +545,13 @@ public class Client {
 
     System.out.println("SendToServer");
     for (MyFile item : SendToServer) {
-
-      /*if (incoming.contains(item.name)) {
-        System.out.println("Ignoring update to " + item.name + " since it seems to have come from server");
-      } else if (ignoreUpdatesTo != null && ignoreUpdatesTo.equals(localDir + "/" + item.name)) {
-        System.out.println("Ignoring update to " + item.name);
-      } else*/ {
-        outQueue.addFirst(item);
-        System.out.println(item);
-      }
-
+      outQueue.addFirst(item);
+      System.out.println(item);
     }
 
     checkQueue();
 
-    updateLastSync(); // perhaps this shoud happen after all inbound have finished
+    updateLastSync(); // TODO: this shoud actually happen after all inbound have finished
 
     System.out.println("Setting lasySync to " + lastSync);
 
@@ -819,7 +756,6 @@ public class Client {
   public void sendCommandToServer(Common.Signal signal) {
     try {
       dataOutStream.writeByte(signal.index());
-      //dataOutStream.writeUTF(signal);
       //dataOutStream.flush();
     } catch (Exception e) {
       printWarning("Sending error for ("+ signal.toString() +"): " + e.getMessage());
@@ -835,9 +771,6 @@ public class Client {
     Client.printMessage("GatherDirectoryUpdates has finished");
 
     GatherSync();
-
-    // this happens when the sync is done since sync() waits
-//    sendMessageToServer("syncfinished");
   }
   
   /**
@@ -918,9 +851,7 @@ public class Client {
   public boolean serverDiscussion(Common.Signal messageToServer, Common.Signal expectedReturnCommand, String argument) {
 
     int pollseconds = 1;
-    int pollcount = 10;
-
-    //String expectedReturnCommand = messageToServer + "_response";  //iArgs[0] + "_response";
+    int pollcount = 20;
 
     System.out.println("serverDiscussion starting with expected return: " + expectedReturnCommand.toString());
     System.out.println("serverDiscussion sending message to server: " + messageToServer.toString());
@@ -937,7 +868,7 @@ public class Client {
 
     for (int i=0; i<pollcount; i++){
       try{Thread.sleep(pollseconds * 1000);}catch(Exception ee){}
-      if (expectedReturnCommand.equals(lastReceivedOperation)) {
+      if (expectedReturnCommand == (lastReceivedOperation)) {
         System.out.println("serverDiscussion returning true with: " + lastReceivedOperation);
         lastReceivedOperation = null;
         return true;
@@ -970,7 +901,6 @@ public class Client {
     while (true) {
       try {
         serverConnectionSocket = new Socket(account.serverName, account.serverPort);
-        //dataOutStream = new DataOutputStream(serverConnectionSocket.getOutputStream());
 
         outStream = serverConnectionSocket.getOutputStream();
         inStream = serverConnectionSocket.getInputStream();
@@ -1154,6 +1084,5 @@ public class Client {
     client.start();
   }
 
-  
 
 }

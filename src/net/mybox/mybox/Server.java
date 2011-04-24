@@ -44,10 +44,10 @@ public class Server {
   public static int defaultQuota = 50;  // megabytes
   public static int port = Common.defaultCommunicationPort;
 
-  ServerDB serverDb = null;
+  ServerDB accountsDb = null;
 
-  public static String defaultDbFile = null;//Common.getAppHome() + "/mybox_server_db.xml";
-  public static String defaultConfigFile = null;//Common.getAppHome() + "/mybox_server.conf";
+  public static String defaultAccountsDbFile = null;
+  public static String defaultConfigFile = null;
   public static final String logFile = "/tmp/mybox_server.log";
 
   public static String serverBaseDir = System.getProperty("user.home") + "/mbServerSpace";
@@ -73,11 +73,11 @@ public class Server {
    * To be called at static init time, or after the global app home path has been changed
    */
   public static void updatePaths() {
-    defaultDbFile = Common.getAppHome() + "/mybox_server_db.xml";
+    defaultAccountsDbFile = Common.getAppHome() + "/mybox_server_db.xml";
     defaultConfigFile = Common.getAppHome() + "/mybox_server.conf";
   }
 
-
+  
   private static void log(String message) {
     // TODO: change this to be a static PrintWriter opened at construction time
     PrintWriter out = null;
@@ -133,13 +133,13 @@ public class Server {
    * Constructor
    * @param configFile
    */
-  public Server(String configFile, String dbFile) {
+  public Server(String configFile, String accountsDBfile) {
 
     printMessage("Starting server");
     printMessage("config: " + configFile);
-    printMessage("database: " + dbFile);
+    printMessage("database: " + accountsDBfile);
 
-    serverDb = new ServerDB(dbFile);
+    accountsDb = new ServerDB(accountsDBfile);
 
     readConfig(configFile);
 
@@ -169,9 +169,9 @@ public class Server {
    * @param operation
    * @param arg
    */
-  public void spanCatchupOperation(int myHandle, String accountId, Common.Signal operation, String arg) {
+  public synchronized void spanCatchupOperation(int myHandle, String accountId, Common.Signal operation, String arg) {
 
-    System.out.println("spanCatchupOperation from " + myHandle + " to all " + accountId + " (" + operation.toString() +","+ arg +")");
+//    System.out.println("spanCatchupOperation from " + myHandle + " to all account=" + accountId + " (" + operation.toString() +","+ arg +")");
 
     HashSet<Integer> thisMap = multiClientMap.get(accountId);
 
@@ -179,9 +179,15 @@ public class Server {
       if (thisHandle == myHandle)
         continue;
 
-      ServerClientConnection client = clients.get(thisHandle);
+      System.out.println("spanCatchupOperation from " + myHandle + " to " + thisHandle + " (" + operation.toString() +","+ arg +")");
 
-      client.sendCatchup(operation, arg);
+      try {
+        ServerClientConnection client = clients.get(thisHandle);
+        client.sendCatchup(operation, arg);
+      } catch (Exception e) {
+        System.out.println("Exception in spanCatchupOperation " + e.getMessage());
+        System.exit(1);
+      }
     }
 
   }
@@ -191,24 +197,30 @@ public class Server {
    * Remove a client connection from the server
    * @param handle
    */
-  public synchronized void removeClient(int handle) {
+  public void removeAndTerminateConnection(int handle) {
 
     ServerClientConnection toTerminate = clients.get(handle);
-
-    if (toTerminate.account != null)
+    
+    if (toTerminate.account != null) {
       printMessage("Removing client " + handle + " (" + toTerminate.account.email +")");
+
+      // update the client map
+      HashSet<Integer> thisMap = multiClientMap.get(toTerminate.account.id);
+      thisMap.remove(handle);
+      multiClientMap.put(toTerminate.account.id, thisMap);
+    }
     else
       printMessage("Removing null client " + handle);
 
     try {
+      // stop the thread
       toTerminate.close();
     } catch (IOException ioe) {
       printMessage("Error closing thread: " + ioe);
     }
 
+    // remove from list
     clients.remove(handle);
-
-    //toTerminate.stop();
   }
 
   /**
@@ -222,13 +234,9 @@ public class Server {
       return;
     }
     
-    ServerClientConnection thisClient = new ServerClientConnection(this, socket);
-    printMessage("Client accepted: " + socket);
-    
-    try{
-      thisClient.open();
-      thisClient.start();
-      clients.put(thisClient.getHandle(), thisClient);
+    try {
+      clients.put(socket.getPort(), new ServerClientConnection(this, socket));
+      printMessage("Client accepted: " + socket);
     }
     catch (Exception e) {
       printMessage("Error attaching client: " + e);
@@ -285,7 +293,7 @@ public class Server {
 
     
     String configFile = defaultConfigFile;
-    String dbFile = defaultDbFile;
+    String accountsDBfile = defaultAccountsDbFile;
     
     
     if (cmd.hasOption("c")) {
@@ -299,16 +307,16 @@ public class Server {
         printErrorExit("Default config file does not exist: " + configFile);
     }
     if (cmd.hasOption("d")){
-      dbFile = cmd.getOptionValue("d");
-      File fileCheck = new File(dbFile);
+      accountsDBfile = cmd.getOptionValue("d");
+      File fileCheck = new File(accountsDBfile);
       if (!fileCheck.isFile())
-        printErrorExit("Specified database file does not exist: " + dbFile);
+        printErrorExit("Specified database file does not exist: " + accountsDBfile);
     } else {
-      File fileCheck = new File(dbFile);
+      File fileCheck = new File(accountsDBfile);
       if (!fileCheck.isFile())
-        printErrorExit("Default database file does not exist: " + dbFile);
+        printErrorExit("Default database file does not exist: " + accountsDBfile);
     }
 
-    Server server = new Server(configFile, dbFile);
+    Server server = new Server(configFile, accountsDBfile);
   }
 }

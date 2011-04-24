@@ -24,12 +24,15 @@ package net.mybox.mybox;
 import java.net.*;
 import java.io.*;
 import java.util.*;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 import org.json.simple.*;
+import java.sql.*;
 
 /**
  * This object is a thread instance mantained by the server that represents a connected client
  */
-public class ServerClientConnection extends Thread {
+public class ServerClientConnection {
 
   private Server parent = null;
   private Socket socket = null;
@@ -47,10 +50,11 @@ public class ServerClientConnection extends Thread {
   private static LinkedList<MyFile> outQueue = new LinkedList<MyFile>();
 
   private static String localDir = null;
+  private static String fileDatabase = null;
+  private static Connection connection = null;  // connection to file database
 
 
   public ServerClientConnection(Server _server, Socket _socket) {
-    //super();
 
     parent = _server;
     socket = _socket;
@@ -66,16 +70,23 @@ public class ServerClientConnection extends Thread {
     dataInStream = new DataInputStream(inStream);
     dataOutStream = new DataOutputStream(outStream);
 
+    // load the sqlite-JDBC driver using the current class loader
+    try {
+      Class.forName("org.sqlite.JDBC");
+    } catch (Exception e) {
+      System.out.println("Unable to load sqlite driver " + e.getMessage());
+      System.exit(1);
+    }
     startServerInputListenerThread();
 
   }
 
 
-  private synchronized void handleInput(Common.Signal input) {
+  private void handleInput(Common.Signal input) {
 
     Server.printMessage("(" + Common.now() + ") Client " + handle + ": " + input.toString());
 
-    if (input == (Common.Signal.c2s)) {
+    if (input == Common.Signal.c2s) {
       try {
         String fileName = ByteStream.toString(inStream);
         String fileTimeString = ByteStream.toString(inStream);
@@ -93,7 +104,7 @@ public class ServerClientConnection extends Thread {
       catch (Exception e){
         System.out.println("c2s operation failed: " + e.getMessage());
       }
-    } else if (input ==(Common.Signal.clientWantsToSend)) {
+    } else if (input == Common.Signal.clientWantsToSend) {
       try {
         String fileName = ByteStream.toString(inStream);
         String fileTimeString = ByteStream.toString(inStream);
@@ -114,7 +125,7 @@ public class ServerClientConnection extends Thread {
       catch (Exception e){
         System.out.println("c2s operation failed: " + e.getMessage());
       }
-    } else if (input == (Common.Signal.clientWants)) {
+    } else if (input == Common.Signal.clientWants) {
       try {
         String fileName = ByteStream.toString(inStream);
         System.out.println("client requesting from server: " + fileName);
@@ -126,7 +137,7 @@ public class ServerClientConnection extends Thread {
       } catch (Exception e) {
         System.out.println("clientWants operation failed: " + e.getMessage());
       }
-    } else if (input == (Common.Signal.deleteOnServer)) {  // handles files and directories
+    } else if (input == Common.Signal.deleteOnServer) {  // handles files and directories
       try {
         String fileName = ByteStream.toString(inStream);
         System.out.println("client requested deletion on server: " + fileName);
@@ -142,7 +153,7 @@ public class ServerClientConnection extends Thread {
       } catch (Exception e) {
         System.out.println("deleteOnServer operation failed: " + e.getMessage());
       }
-    } else if (input == (Common.Signal.renameOnServer)) {  // handles files and directories
+    } else if (input == Common.Signal.renameOnServer) {  // handles files and directories
       try {
         String oldName = ByteStream.toString(inStream);
         String newName = ByteStream.toString(inStream);
@@ -158,7 +169,7 @@ public class ServerClientConnection extends Thread {
       } catch (Exception e) {
         System.out.println("renameOnServer operation failed: " + e.getMessage());
       }
-    } else if (input == (Common.Signal.createDirectoryOnServer)) {
+    } else if (input == Common.Signal.createDirectoryOnServer) {
       try {
         String name = ByteStream.toString(inStream);
         System.out.println("client requesting create directory on server: " + name);
@@ -167,10 +178,11 @@ public class ServerClientConnection extends Thread {
         parent.spanCatchupOperation(handle, account.id, input, name);
       } catch (Exception e) {
         System.out.println("createDirectoryOnServer operation failed: " + e.getMessage());
+        System.exit(1);
       }
-    } else if (input == (Common.Signal.requestServerFileList)) {
+    } else if (input == Common.Signal.requestServerFileList) {
       sendServerFileList();
-    } else if (input == (Common.Signal.attachaccount)) {
+    } else if (input == Common.Signal.attachaccount) {
 
       String args = null;
 
@@ -179,33 +191,34 @@ public class ServerClientConnection extends Thread {
       } catch (Exception e) {
         //
       }
-        HashMap attachInput = Common.jsonDecode(args);
-        String email = (String)attachInput.get("email");
+
+      HashMap attachInput = Common.jsonDecode(args);
+      String email = (String)attachInput.get("email");
 //        String password = (String)attachInput.get("password");
 
-        JSONObject jsonOut = new JSONObject();
-        jsonOut.put("serverMyboxVersion", Common.appVersion);
-        
-        if (attachAccount(email)) {
-          jsonOut.put("status", "success");
-          jsonOut.put("quota", account.quota);
-          jsonOut.put("salt", account.salt);
+      JSONObject jsonOut = new JSONObject();
+      jsonOut.put("serverMyboxVersion", Common.appVersion);
 
-          parent.updateMultiMap(account.id, handle);
-        } else {
-          jsonOut.put("status", "failed");
-          jsonOut.put("error", "invalid account");
-        }
+      if (attachAccount(email)) {
+        jsonOut.put("status", "success");
+        jsonOut.put("quota", account.quota);
+        jsonOut.put("salt", account.salt);
 
-        try {
-          sendCommandToClient(Common.Signal.attachaccount_response);
-          ByteStream.toStream(outStream, jsonOut.toJSONString());
-        }
-        catch (Exception e) {
-          //
-        }
+        parent.updateMultiMap(account.id, handle);
+      } else {
+        jsonOut.put("status", "failed");
+        jsonOut.put("error", "invalid account");
+      }
 
-        Server.printMessage("attachaccount_response: " + jsonOut);
+      try {
+        sendCommandToClient(Common.Signal.attachaccount_response);
+        ByteStream.toStream(outStream, jsonOut.toJSONString());
+      }
+      catch (Exception e) {
+        //
+      }
+
+      Server.printMessage("attachaccount_response: " + jsonOut);
       
     } else {
       Server.printMessage("unknown command: "+ input);
@@ -221,7 +234,6 @@ public class ServerClientConnection extends Thread {
    * @param arg
    */
   public void sendCatchup(Common.Signal operation, String arg) {
-    // TODO: handle file transfers
     
     if (operation == (Common.Signal.c2s)) {
       try {
@@ -236,10 +248,10 @@ public class ServerClientConnection extends Thread {
         }
         
       } catch (Exception e) {
-        System.out.println("catchup s2c to client failed: " + e.getMessage());
+        System.out.println("catchup s2c to client failed: " + e.getMessage() + e.getStackTrace());
       }
       
-    } else if (operation == (Common.Signal.deleteOnServer)) {  // handles files and directories?
+    } else if (operation == Common.Signal.deleteOnServer) {  // handles files and directories?
       try {
         System.out.println("catchup delete to client ("+ handle + "): " + arg);
         sendCommandToClient(Common.Signal.deleteOnClient);
@@ -247,22 +259,21 @@ public class ServerClientConnection extends Thread {
       } catch (Exception e) {
         System.out.println("catchup delete to client failed: " + e.getMessage());
       }
-    } else if (operation == (Common.Signal.renameOnServer)) {  // handles files and directories?
+    } else if (operation == Common.Signal.renameOnServer) {  // handles files and directories?
       try {
         System.out.println("catchup rename to client ("+ handle + "): " + arg);
-//        String[] args = arg.split(" -> ");
         sendCommandToClient(Common.Signal.renameOnClient);
         ByteStream.toStream(outStream, arg);
       } catch (Exception e) {
         System.out.println("catchup rename to client failed: " + e.getMessage());
       }
-    } else if (operation == (Common.Signal.createDirectoryOnServer)) {
+    } else if (operation == Common.Signal.createDirectoryOnServer) {
       try {
         System.out.println("catchup createDirectoryOnClient ("+ handle + "): " + arg);
         sendCommandToClient(Common.Signal.createDirectoryOnClient);
         ByteStream.toStream(outStream, arg);
       } catch (Exception e) {
-        System.out.println("catchup createDirectoryOnClient failed: " + e.getMessage());
+        System.out.println("catchup createDirectoryOnClient failed: " + e.getMessage() + e.getStackTrace());
       }
     } else {
       Server.printMessage("unknown command: "+ operation);
@@ -276,6 +287,19 @@ public class ServerClientConnection extends Thread {
 
     System.out.println("getting local file list for: " + localDir);
 
+    Statement statement = null;
+
+    // refresh the database
+    try {
+      statement = connection.createStatement();
+      statement.setQueryTimeout(30);  // set timeout to 30 sec.
+      
+      statement.executeUpdate("drop table if exists archive");
+      statement.executeUpdate("create table archive (name text, type char(1), lastupdate integer)");
+    } catch (Exception e) {
+      System.out.println("Sqlite error: " + e.getMessage());
+    }
+    
     try {
       List<MyFile> files = Common.getFileListing(new File(localDir));
       
@@ -283,6 +307,7 @@ public class ServerClientConnection extends Thread {
 
       for (MyFile thisFile : files) {
         System.out.println(" " + thisFile.name);
+        statement.executeUpdate("insert into archive values('"+ thisFile.name +"', '"+ thisFile.getTypeChar() +"', "+ thisFile.modtime +")");
         jsonArray.add(thisFile.serialize());
       }
 
@@ -297,7 +322,7 @@ public class ServerClientConnection extends Thread {
 
   }
 
-  private void sendFile(MyFile myFile) {
+  private synchronized void sendFile(MyFile myFile) {
 
     System.out.println("sending file " + myFile.name);
 
@@ -330,6 +355,7 @@ public class ServerClientConnection extends Thread {
 
     // start a new thread for getting input from the client (anonymous ServerInThread)
     new Thread(new Runnable() {
+      @Override
       public void run() {
 
         while (true) {
@@ -338,6 +364,7 @@ public class ServerClientConnection extends Thread {
             handleInput(Common.Signal.get(dataInStream.readByte()));
           } catch (IOException ioe) {
             System.out.println("Client disconnected");
+            parent.removeAndTerminateConnection(handle);
             // assume this happens because the client socket disconnected
             return;
           }
@@ -347,14 +374,10 @@ public class ServerClientConnection extends Thread {
     }).start();
 
   }
-
-  public int getHandle() {
-    return handle;
-  }
-
+  
   public boolean attachAccount(String email) {
 
-    account = parent.serverDb.getAccountByEmail(email);
+    account = parent.accountsDb.getAccountByEmail(email);
     localDir = account.serverdir;
 
     if (account == null) {
@@ -364,57 +387,46 @@ public class ServerClientConnection extends Thread {
     
     Server.printMessage("Attached account "+ account + " to handle " + handle);
     Server.printMessage("Local server storage in: " + account.serverdir);
+
+    fileDatabase = Server.serverBaseDir + "/" + account.id + "_fileArchive.db"; // perhaps this does not beed to be global
+    
+    try {
+      // create a database connection
+      connection = DriverManager.getConnection("jdbc:sqlite:" + fileDatabase);
+    } catch (Exception e) {
+      return false;
+    }
     return true;
   }
 
 
-  public void sendCommandToClient(Common.Signal signal) {
+  public synchronized void sendCommandToClient(Common.Signal signal) {
     try {
       dataOutStream.writeByte(signal.index());
 //      dataOutStream.writeUTF(command);
     //  dataOutStream.flush();
     } catch (IOException ioe) {
       Server.printMessage(handle + " ERROR sending: " + ioe.getMessage());
-      parent.removeClient(handle);
-      //stop();
+      parent.removeAndTerminateConnection(handle);
     }
   }
 
-
-  @Override
-  public void run() {
-    Server.printMessage("Client attached to socket handle " + handle);
-
-    /*
-    while (true) {
-      try {
-        parent.handleMessageFromClient(handle, dataInStream.readUTF());
-      } catch (IOException ioe) {
-        //System.out.println(ID + " ERROR reading: " + ioe.getMessage());
-        parent.removeClient(handle);
-        break;
-      }
-    }
-     *
-     */
-  }
-
-  public void open() throws IOException {
-//    dataInStream = new DataInputStream(new BufferedInputStream(socket.getInputStream()));
-//    dataOutStream = new DataOutputStream(new BufferedOutputStream(socket.getOutputStream()));
-  }
 
   public void close() throws IOException {
-    if (socket != null) {
+    if (socket != null) 
       socket.close();
-    }
-    /*
-    if (streamIn != null) {
-      streamIn.close();
-    }
-    if (streamOut != null) {
-      streamOut.close();
-    }
-     */
+    
+    if (dataInStream != null)
+      dataInStream.close();
+    
+    if (dataOutStream != null)
+      dataOutStream.close();
+
+    if (inStream != null)
+      inStream.close();
+
+    if (outStream != null)
+      outStream.close();
+    
   }
 }

@@ -252,7 +252,7 @@ public class ServerAdmin {
       Server.updatePaths();
     }
 
-    String dbFile = Server.defaultDbFile;
+    String dbFile = Server.defaultAccountsDbFile;
 
     if (cmd.hasOption("d")){
       dbFile = cmd.getOptionValue("d");
