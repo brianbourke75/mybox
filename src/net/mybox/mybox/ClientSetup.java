@@ -32,57 +32,9 @@ import org.apache.commons.cli.*;
 public class ClientSetup {
 
   private ClientAccount account = null;
-
   private String password = null;
-
-  private String configFile = Client.defaultConfigFile;
+  private String configDir = null;
   
-  private String sshSettingsDir = System.getProperty("user.home") +
-          System.getProperty("file.separator") + ".ssh/";
-    
-
-  /**
-   * Check that the necessary files and scripts exist and have the correct permissions
-   */
-  private void checkFiles() {
-
-    // make sure necessarry local files and directories exist with correct permissions
-
-    // create .ssh directory
-    
-    File dirSsh = new File(sshSettingsDir);
-    if (!dirSsh.isDirectory()) {
-      Client.printMessage(dirSsh + " does not exist, so it is being created");
-
-      if (!dirSsh.mkdir())
-        Client.printErrorExit("unable to create .ssh directory");
-
-      // TODO: set permissions too?
-    }
-
-    // touch known_hosts file
-    try {
-      File knownHostsFile = new File(dirSsh + "known_hosts");
-      if (!knownHostsFile.exists())
-        org.apache.commons.io.FileUtils.touch(knownHostsFile);
-    }
-    catch (Exception e) {
-      Client.printErrorExit("There was an error creating the known_hosts file: " + e);
-    }
-
-    File sshScript = new File(Client.sshCommand);
-    File unisonCommand = new File(Client.clientUnisonCommand);
-
-    if (!sshScript.exists() || !unisonCommand.exists())
-      Client.printErrorExit("Unable to find local unison and ssh scripts " + unisonCommand + " " + sshScript);
-
-    if (!sshScript.canExecute()) // does this require java 1.6?
-      sshScript.setExecutable(true);  // linux only? will this bork in windows?
-
-    if (!unisonCommand.canExecute())
-      unisonCommand.setExecutable(true);
-
-  }
 
   /**
    * Get the initial input from the user
@@ -92,32 +44,30 @@ public class ClientSetup {
     BufferedReader br = new BufferedReader(new InputStreamReader(System.in));
 
     String input = null;
-    
-    Client.printMessage_("Server name ["+ account.serverName +"]: ");
-    
-    try {
-      input = br.readLine();
-    }
-    catch (Exception e) {
-      
-    }
 
+    System.out.print("Configuration directory ["+ configDir +"]: ");
+    try {  input = br.readLine(); }
+    catch (Exception e) {  }
+    if (!input.isEmpty())  configDir = input;
+
+    System.out.print("Data directory ["+ account.directory +"]: ");
+    try {  input = br.readLine(); }
+    catch (Exception e) {  }
+    if (!input.isEmpty())  account.directory = input;
+
+    System.out.print("Server name ["+ account.serverName +"]: ");
+    try {  input = br.readLine(); }
+    catch (Exception e) {  }
     if (!input.isEmpty())  account.serverName = input;
 
-    Client.printMessage_("Server port ["+ account.serverPort +"]: ");
-
-    try {
-      input = br.readLine();
-    }
-    catch (Exception e) {
-      
-    }
+    System.out.print("Server port ["+ account.serverPort +"]: ");
+    try {  input = br.readLine(); }
+    catch (Exception e) {  }
 
     if (!input.isEmpty()) {
       account.serverPort = Integer.parseInt(input);  //catch
     }
 
-    // ping the server to make sure it is up
     Socket socket = null;
     try {
       socket = new Socket(account.serverName, account.serverPort);
@@ -126,15 +76,9 @@ public class ClientSetup {
       Client.printErrorExit("Unable to contact server");
     }
 
-    Client.printMessage_("Email ["+ account.email +"]: ");
-
-    try {
-      input = br.readLine();
-    }
-    catch (Exception e) {
-      
-    }
-
+    System.out.print("Email ["+ account.email +"]: ");
+    try {  input = br.readLine();  }
+    catch (Exception e) {    }
     if (!input.isEmpty())  account.email = input;
 
     Console console = System.console();
@@ -144,78 +88,12 @@ public class ClientSetup {
     else
       System.err.println("Unable to get password since not in console");
 
-    System.out.println("pw input : " + input);
+    //System.out.println("pw input : " + input);
 
     if (!input.isEmpty()) password = input;
   }
   
   
-  /**
-   * Configure known_hosts file, generate keypairs and test the ssh connection
-   */
-  private void configSSH(Client client) {
-
-    // set the local known_hosts file
-    Client.setKnownHosts(account.serverName);  // should check return code
-
-    // check to see if unison is installed on the client side
-    SysResult localResult = Common.syscommand(new String[]{Client.clientUnisonCommand, "-version"});
-
-    if (localResult.output.contains("unison"))
-      Client.printMessage("Checking for local copy of unison: Passed");
-    else
-      Client.printErrorExit("Local unison cannot be found");
-
-    // check to see if a local key is already present
-
-    String keyFileName = System.getProperty("user.home") + "/.ssh/mybox_rsa";
-
-    SysResult testkAuthResult = null;
-
-    File keyFile = new File(keyFileName);
-
-    if (keyFile.exists()) {
-      // check to see if we can already SSH to the server with the local key
-      testkAuthResult = Client.runSshCommand(account.serverName, account.serverPOSIXaccount,
-              keyFileName, client.serverUnisonCommand + " -version");
-    }
-
-    // if existing key already works dont generate a new one
-    if (testkAuthResult != null && testkAuthResult.worked) {
-      Client.printMessage("Primary auth test passed. No need to generate new key.");
-    }
-    // else generate a new one
-    else {
-      Client.printMessage("Primary auth test failed. So a new key will be generated.");
-
-      // make the new key and copy it to the server
-      SysResult keygenResult = Client.keyGen();
-      SysResult keytranserResult = Client.transferPublicKey(account.serverName, account.serverPOSIXaccount,
-              password, keygenResult.output + ".pub");
-
-      if (!keygenResult.worked && !keytranserResult.worked)
-        Client.printErrorExit("There was an error when handling SSH keys");
-
-      // test ssh (via JSch) authentication with the generated key
-      SysResult kAuthResult = Client.runSshCommand(account.serverName, account.serverPOSIXaccount,
-              keygenResult.output, client.serverUnisonCommand + " -version");
-
-      if (kAuthResult.worked && kAuthResult.output.equals(localResult.output))
-        Client.printMessage("testing key auth: Passed");
-      else
-        Client.printErrorExit("Error performing key authentication");
-    }
-
-    // test ssh (via command shell) authentication with the generated key
-    SysResult pkAuthResult = Common.syscommand(new String[]{Client.sshCommand,
-            account.serverPOSIXaccount + "@" + account.serverName, client.serverUnisonCommand, "-version"});
-
-    if (pkAuthResult.worked && pkAuthResult.output.equals(localResult.output))
-      Client.printMessage("testing process key auth: Passed");
-    else
-      Client.printErrorExit("Error performing process key authentication");
-
-  }
   
   /**
    * Generate the config file after everything has been setup
@@ -230,17 +108,17 @@ public class ClientSetup {
     config.setProperty("email", account.email);
     config.setProperty("salt", account.salt);
 
-    if (!account.directory.equals(Client.defaultClientDir))
+    //if (!account.directory.equals(Client.defaultClientDir))
       config.setProperty("directory", account.directory);
 
     try {
-      FileOutputStream MyOutputStream = new FileOutputStream(configFile);
+      FileOutputStream MyOutputStream = new FileOutputStream(Client.configFile);
       config.store(MyOutputStream, "Mybox client configuration file");
     } catch (Exception e) {
       Server.printErrorExit(e.getMessage());
     }
     
-    Client.printMessage("Config file written: " + configFile);
+    System.out.println("Config file written: " + Client.configFile);
 
     return true;
   }
@@ -252,40 +130,52 @@ public class ClientSetup {
     account = new ClientAccount();
     account.serverName = "localhost";
     account.serverPort = Common.defaultCommunicationPort;
-    account.email = "bill@microsoft.com";
-    password = "bill";  // only used for POSIX login
+    account.email = "bill@gates.com";
+    password = "bill";
+
+    configDir = Client.defaultConfigDir;
+
     
-    Client.printMessage("Welcome to the Mybox setup wizard");
+    System.out.println("Welcome to the Mybox setup wizard");
     
     gatherInput();
     
-    // attach the account to the server to get the ssh user name
+    // attach the account to the server to get the user
+    // TODO: clean up this function and its arguments
     Client client = new Client();
-    account = client.startGetAccountMode(account.serverName, account.serverPort, account.email);
+    account = client.startGetAccountMode(account.serverName, account.serverPort, account.email, account.directory);
     client.stop();
 
-    if (account.serverPOSIXaccount == null)
-      Client.printErrorExit("Unable to determine POSIX account during setup");
     
-    checkFiles();
-
-    configSSH(client);
-
-    Client.printMessage("testing directory " + account.directory);
-
-    File dirCheck = new File(account.directory);
-    if (!dirCheck.exists()) {
-      Client.printMessage("Creating directory since it does not exist...");
-      if (dirCheck.mkdir())
-        Client.printMessage("Created directory " + account.directory);
-      else
-        Client.printMessage("Unable to create directory"); // error?
+    // data directory
+    if (!Common.createLocalDirectory(account.directory)) {
+      System.err.print("Data directory could not be created directory " + account.directory);
+      System.exit(1);
     }
+
+    // config directory
+    if (!Common.createLocalDirectory(configDir)) {
+      System.err.println("Config directory could not be created: " + configDir);
+      System.exit(1);
+    }
+
+    Client.setConfigDir(configDir);
 
     saveConfig();
 
-    Client.printMessage("Setup finished successfully");
+    System.out.println("Setup finished successfully");
 
+  }
+
+
+  private static void setConfigDir(String configDir) {
+
+    if (!Common.createLocalDirectory(configDir)) {
+      System.err.println("Specified config directory could not be created: " + configDir);
+      System.exit(1);
+    }
+
+    Client.setConfigDir(configDir);
   }
 
   /**
@@ -295,12 +185,15 @@ public class ClientSetup {
   public static void main(String[] args) {
 
     Options options = new Options();
+//    options.addOption("c", "config", true, "configuration directory (will be created)");
     options.addOption("a", "apphome", true, "application home directory");
     options.addOption("h", "help", false, "show help screen");
     options.addOption("V", "version", false, "print the Mybox version");
 
     CommandLineParser line = new GnuParser();
     CommandLine cmd = null;
+
+    String configDir = Client.defaultConfigDir;
 
     try {
       cmd = line.parse(options, args);
@@ -332,6 +225,12 @@ public class ClientSetup {
 
       Client.updatePaths();
     }
+
+//    if (cmd.hasOption("c")) {
+//      configDir = cmd.getOptionValue("c");
+//    }
+//
+//    setConfigDir(configDir);
 
     ClientSetup setup = new ClientSetup();
 

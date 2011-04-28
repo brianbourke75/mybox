@@ -24,6 +24,10 @@ package net.mybox.mybox;
 import java.net.*;
 import java.io.*;
 
+
+// DEPRICATED
+
+
 /**
  * The Client uses this class to listen to messages from the server
  */
@@ -77,8 +81,8 @@ public class ClientServerReceiver extends Thread {
   public void run() {
     while (thread != null) {
       try {
-        client.handleMessageFromServer(streamIn.readUTF());
-      } catch (IOException ioe) {
+//        client.handleMessageFromServer(streamIn.readUTF());
+      } catch (Exception ioe) {
         
         // if the disconnection was lost
         //if (thread == null) {

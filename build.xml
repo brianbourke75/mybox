@@ -41,7 +41,7 @@ is divided into following sections:
     <property name="includes" value="**" />
     <property name="jar.compress" value="false" />
 
-		<property name="javac.classpath" value="${javac.libdir}/commons-codec.jar:${javac.libdir}/commons-cli.jar:${javac.libdir}/commons-lang.jar:${javac.libdir}/commons-io.jar:${javac.libdir}/jnotify-jono.jar:${javac.libdir}/json_simple-1.1.jar:${javac.libdir}/jsch.jar" />
+		<property name="javac.classpath" value="${javac.libdir}/commons-codec.jar:${javac.libdir}/commons-cli.jar:${javac.libdir}/commons-lang.jar:${javac.libdir}/commons-io.jar:${javac.libdir}/jnotify-jono.jar:${javac.libdir}/json_simple-1.1.jar:${javac.libdir}/sqlite-jdbc-3.6.20.jar" />
 
 		<property name="source.encoding" value="UTF-8" />
 		<property name="javac.compilerargs" value="" />

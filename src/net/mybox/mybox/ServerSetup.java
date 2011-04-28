@@ -45,40 +45,35 @@ public class ServerSetup {
 
     String input = null;
     
-    Client.printMessage_("Port ["+port+"]: ");
+    Server.printMessage_("Port ["+port+"]: ");
     
     try {   input = br.readLine();   }    catch (Exception e) {   }
     if (!input.isEmpty())  
       port = Integer.parseInt(input); // catch
 
-    Client.printMessage_("Quota in megabytes ["+defaultQuota+"]: ");
+    Server.printMessage_("Quota in megabytes ["+defaultQuota+"]: ");
 
     try {   input = br.readLine();   }    catch (Exception e) {   }
 
     if (!input.isEmpty())
       defaultQuota = Integer.parseInt(input);  //catch
 
-    Client.printMessage_("Config file ["+configFile+"]: ");
+    Server.printMessage_("Config file ["+configFile+"]: ");
 
     try {   input = br.readLine();   }    catch (Exception e) {   }
     if (!input.isEmpty())
       configFile = input; //catch
+
+    // TODO: set base storage directory
   }
 
   private boolean setupDirectories() {
 
-    // add .ssh to /etc/skel
+    File baseDir = new File(Server.serverBaseDir);
 
-    File sshdir = new File("/etc/skel/.ssh");
-
-    if (!sshdir.exists())
-      if (!sshdir.mkdir())
+    if (!baseDir.exists())
+      if (!baseDir.mkdir())
         return false;
-
-    // make sure the permissions are correct
-    SysResult result = Common.syscommand(new String[]{"sudo", "chmod", "0700", sshdir.getAbsolutePath()});
-    if (!result.worked)
-      return false;
 
     return true;
   }
@@ -106,25 +101,6 @@ public class ServerSetup {
     return true;
   }
 
-  /**
-   * Check various files and their permissions
-   * @return true if the check passed
-   */
-  private boolean checkFiles() {
-
-    // check for the unison command and make sure it can be executed
-
-    File unisonCommand = new File(Server.serverUnisonCommand);
-
-    if (!unisonCommand.exists())
-      return false;
-
-    if (!unisonCommand.canExecute())
-      unisonCommand.setExecutable(true);
-
-    return true;
-  }
-
   private boolean createNewDB() {
 
     try {
@@ -140,15 +116,12 @@ public class ServerSetup {
    */
   private ServerSetup() {
 
-    Client.printMessage("Welcome to the Mybox server setup wizard");
-    // TODO: make sure they are the superuser
+    Server.printMessage("Welcome to the Mybox server setup wizard");
+    // TODO: make sure they are the superuser. or maybe the SU is no longer needed without unison?
     
     // TODO: add facility to create a new database
 
     gatherInput();
-
-    if (!checkFiles())
-      Server.printErrorExit("Unable to setup needed files.");
     
     if (!setupDirectories())
       Server.printErrorExit("Unable to setup directories. Make sure you run as super user.");
@@ -178,18 +151,18 @@ public class ServerSetup {
     } catch( Exception exp ) {
       System.err.println( exp.getMessage() );
       HelpFormatter formatter = new HelpFormatter();
-      formatter.printHelp( Client.class.getName(), options );
+      formatter.printHelp( Server.class.getName(), options );
       return;
     }
 
     if (cmd.hasOption("h")) {
       HelpFormatter formatter = new HelpFormatter();
-      formatter.printHelp( Client.class.getName(), options );
+      formatter.printHelp( Server.class.getName(), options );
       return;
     }
 
     if (cmd.hasOption("V")) {
-      Client.printMessage("version " + Common.appVersion);
+      Server.printMessage("version " + Common.appVersion);
       return;
     }
 
@@ -198,7 +171,7 @@ public class ServerSetup {
       try {
         Common.updatePaths(appHomeDir);
       } catch (FileNotFoundException e) {
-        Client.printErrorExit(e.getMessage());
+        Server.printErrorExit(e.getMessage());
       }
 
       Server.updatePaths();

@@ -33,7 +33,7 @@ public class ServerAdmin {
 
 
   /**
-   * Delete POSIX account and update user database
+   * Delete account and update user database
    */
   private void deleteAccount(){
 
@@ -58,19 +58,14 @@ public class ServerAdmin {
     try { input = br.readLine(); } catch (Exception e) {}
 
     if (input.equals("y")) {
-      
-      // delete the POSIX account
 
-      String serverPOSIXaccount = Server.getServerPOSIXaccountName(thisAccount.id);
+      // delete the data directory
+      File userDir = new File(thisAccount.serverdir);
 
-      System.out.println("deleting POSIX system account");
-      SysResult result = Common.syscommand(new String[]{"sudo", "userdel", "-r", serverPOSIXaccount});
-      System.out.println("delete account " + result);
+      if (!userDir.delete())  // TODO: make recursive
+        Server.printWarning("There was a problem when deleting the user directory");
 
-      // update the database
-      if (!result.worked)
-        System.out.println("Unable to delete POSIX account");
-      else if(serverDb.deleteAccount(thisAccount.id))
+      else if(serverDb.deleteAccount(thisAccount.id)) // update the database
         System.out.println("Account deleted");
       else
         System.out.println("Unable to delete account");
@@ -79,7 +74,7 @@ public class ServerAdmin {
   }
 
   /**
-   * Add POSIX account and update database
+   * Add account and update database
    */
   private void addAccount() {
 
@@ -106,22 +101,18 @@ public class ServerAdmin {
       return;
     }
     
-    // create the POSIX account
+    // create the data directory
     
-    String serverPOSIXaccount = Server.getServerPOSIXaccountName(id);
+    File userDir = new File(Server.serverBaseDir + "/" + id);
 
-    String cryptedUnixPass = UnixCrypt.crypt(password);
-    
-    System.out.println("creating POSIX system account");
-    SysResult result = Common.syscommand(new String[]{"sudo", "useradd", "-m", "-p", cryptedUnixPass, serverPOSIXaccount});
-    System.out.println("add account " + result);
-
-    // update the database
-
-    if (!result.worked) 
-      Server.printWarning("There was a problem when creating the POSIX account");
+    if (userDir.exists())
+      Server.printWarning("Error: user directory already exists");
+    else if (!userDir.mkdir())
+      Server.printWarning("There was a problem when creating the user directory");
+      
     else {
 
+    // update the database
       String salt = null, encryptedPassword = null;
 
       try{
@@ -138,7 +129,7 @@ public class ServerAdmin {
   
   
   /**
-   * Delete POSIX account and update user database
+   * 
    */
   private void showEncryptedPassword(){
 
@@ -261,7 +252,7 @@ public class ServerAdmin {
       Server.updatePaths();
     }
 
-    String dbFile = Server.defaultDbFile;
+    String dbFile = Server.defaultAccountsDbFile;
 
     if (cmd.hasOption("d")){
       dbFile = cmd.getOptionValue("d");

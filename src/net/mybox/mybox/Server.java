@@ -26,9 +26,7 @@ import java.io.*;
 import java.net.*;
 import java.util.*;
 import org.apache.commons.io.FileUtils.*;
-import org.json.simple.*;
 import org.apache.commons.cli.*;
-import org.apache.commons.lang.*;
 
 /**
  * The server component of the system is an executable that clients talk to
@@ -38,36 +36,48 @@ public class Server {
   // list of connected clients
   private HashMap<Integer, ServerClientConnection> clients = new HashMap<Integer, ServerClientConnection>();
   
+  // map of userId => set of all connected clients that belong to that user
+  private HashMap<String, HashSet<Integer>> multiClientMap = new HashMap<String, HashSet<Integer>>();
+
   private ServerSocket server = null;
   public static int maxClients = 20;  // defaults
   public static int defaultQuota = 50;  // megabytes
   public static int port = Common.defaultCommunicationPort;
 
-  ServerDB serverDb = null;
+  ServerDB accountsDb = null;
 
-  public static String defaultDbFile = null;//Common.getAppHome() + "/mybox_server_db.xml";
-  public static String defaultConfigFile = null;//Common.getAppHome() + "/mybox_server.conf";
-  public static final String logFile = "/tmp/mybox_server.log";
-  
-  private static final String serverPOSIXacctPrefix = "mbu_";
-  
-  public static String serverUnisonCommand = null;
+  public static String defaultAccountsDbFile = null;
+  public static String defaultConfigFile = null;
+  public static final String logFile = System.getProperty("java.io.tmpdir") + "/mybox_server.log";
+
+  public static String serverBaseDir = System.getProperty("user.home") + "/mbServerSpace";
 
   static {
     updatePaths();
+  }
+
+  public void updateMultiMap(String id, Integer handle) {
+
+    if (multiClientMap.containsKey(id)) {
+      HashSet<Integer> thisMap = multiClientMap.get(id);
+      thisMap.add(handle);
+      multiClientMap.put(id, thisMap);  // should overwrite the old map
+    } else {
+      HashSet<Integer> thisMap = new HashSet<Integer>();
+      thisMap.add(handle);
+      multiClientMap.put(id, thisMap);
+    }
   }
 
   /**
    * To be called at static init time, or after the global app home path has been changed
    */
   public static void updatePaths() {
-    defaultDbFile = Common.getAppHome() + "/mybox_server_db.xml";
+    defaultAccountsDbFile = Common.getAppHome() + "/mybox_server_db.xml";
     defaultConfigFile = Common.getAppHome() + "/mybox_server.conf";
-    //serverUnisonCommand = Common.getPathToInc() + "/unison-2.40.61-linux_x86";
-    serverUnisonCommand = Common.getPathToInc() + "/unison-2.27.57-linux";
   }
 
-
+  
   private static void log(String message) {
     // TODO: change this to be a static PrintWriter opened at construction time
     PrintWriter out = null;
@@ -104,10 +114,6 @@ public class Server {
     log(message + "\n");
   }
 
-  public static String getServerPOSIXaccountName(String id) {
-    return serverPOSIXacctPrefix + id;
-  }
-
   private void readConfig(String configFile) {
     Properties properties = new Properties();
 
@@ -127,13 +133,13 @@ public class Server {
    * Constructor
    * @param configFile
    */
-  public Server(String configFile, String dbFile) {
+  public Server(String configFile, String accountsDBfile) {
 
     printMessage("Starting server");
     printMessage("config: " + configFile);
-    printMessage("database: " + dbFile);
+    printMessage("database: " + accountsDBfile);
 
-    serverDb = new ServerDB(dbFile);
+    accountsDb = new ServerDB(accountsDBfile);
 
     readConfig(configFile);
 
@@ -156,105 +162,65 @@ public class Server {
     }
   }
 
-  public void sendMessageToClient(int handle, String message) {
-    ServerClientConnection thisClient = clients.get(handle);
-    thisClient.send(message);// TODO: check null
-  }
-
   /**
-   * Deal with items sent from a client to this server
-   */ 
-  public synchronized void handleMessageFromClient(int handle, String input) {
+   * Send message to sibling clients to span out needed sync commands.
+   * @param myHandle
+   * @param accountId
+   * @param operation
+   * @param arg
+   */
+  public synchronized void spanCatchupOperation(int myHandle, String accountId, Common.Signal operation, String arg) {
 
-    printMessage("(" + Common.now() + ") Client " + handle + ": " + input);
+//    System.out.println("spanCatchupOperation from " + myHandle + " to all account=" + accountId + " (" + operation.toString() +","+ arg +")");
 
-    String[] iArgs = input.split(" ");
-    String command = iArgs[0];
-    String args = StringUtils.join(iArgs, " ", 1, iArgs.length);
+    HashSet<Integer> thisMap = multiClientMap.get(accountId);
 
-    ServerClientConnection thisClient = clients.get(handle);
-    
-    if (input.equals("quit")) {
-      clients.get(handle).send("quit");
-      removeClient(handle);
-    }
-    else if (input.equals("syncfinished")){
-      // find all connected clients under the same username and issue a sync command to them
+    for (Integer thisHandle : thisMap) {
+      if (thisHandle == myHandle)
+        continue;
 
-      Set<Map.Entry<Integer, ServerClientConnection> > set = clients.entrySet();
+      System.out.println("spanCatchupOperation from " + myHandle + " to " + thisHandle + " (" + operation.toString() +","+ arg +")");
 
-      for (Map.Entry<Integer, ServerClientConnection> client : set) {
-
-        if (client.getValue().account.id.equals(thisClient.account.id) && client.getKey()!=handle ) {
-          printMessage("issue sync to client " + client.getValue());
-          client.getValue().send("sync");
-        }
-
-      }
-
-      printMessage("Done with catchup syncs");
-
-    }
-    else if (command.equals("attachaccount")) {
-
-      if (thisClient != null) {
-
-        HashMap attachInput = Common.jsonDecode(args);
-        String email = (String)attachInput.get("email");
-//        String password = (String)attachInput.get("password");
-
-        JSONObject jsonOut = new JSONObject();
-        jsonOut.put("serverMyboxVersion", Common.appVersion);
-        
-        if (thisClient.attachAccount(email)) {
-          jsonOut.put("status", "success");
-          jsonOut.put("serverPOSIXaccount", thisClient.account.serverPOSIXaccount);
-          jsonOut.put("quota", thisClient.account.quota);
-          jsonOut.put("serverUnisonCommand", serverUnisonCommand);
-          jsonOut.put("salt", thisClient.account.salt);
-
-          /*
-          File userDir = new File(thisClient.userDir);
-          long bytes = org.apache.commons.io.FileUtils.sizeOfDirectory(userDir);
-          jsonOut.put("totalspaceused", ((float) bytes / (1024L * 1024L)));
-          */
-
-          sendMessageToClient(handle, "attachaccount_response " + jsonOut);
-        } else {
-          jsonOut.put("status", "failed");
-          jsonOut.put("error", "invalid account");
-          sendMessageToClient(handle, "attachaccount_response " + jsonOut);
-        }
+      try {
+        ServerClientConnection client = clients.get(thisHandle);
+        client.sendCatchup(operation, arg);
+      } catch (Exception e) {
+        System.out.println("Exception in spanCatchupOperation " + e.getMessage());
+        System.exit(1);
       }
     }
-    else {
-      printMessage("unknown command: "+ input);
-      thisClient.failedRequestCount++;
-    }
+
   }
+
 
   /**
    * Remove a client connection from the server
    * @param handle
    */
-  public synchronized void removeClient(int handle) {
+  public void removeAndTerminateConnection(int handle) {
 
     ServerClientConnection toTerminate = clients.get(handle);
-
-    if (toTerminate.account != null)
+    
+    if (toTerminate.account != null) {
       printMessage("Removing client " + handle + " (" + toTerminate.account.email +")");
+
+      // update the client map
+      HashSet<Integer> thisMap = multiClientMap.get(toTerminate.account.id);
+      thisMap.remove(handle);
+      multiClientMap.put(toTerminate.account.id, thisMap);
+    }
     else
       printMessage("Removing null client " + handle);
 
     try {
+      // stop the thread
       toTerminate.close();
     } catch (IOException ioe) {
       printMessage("Error closing thread: " + ioe);
     }
 
+    // remove from list
     clients.remove(handle);
-
-    //toTerminate.stop();
   }
 
   /**
@@ -268,13 +234,9 @@ public class Server {
       return;
     }
     
-    ServerClientConnection thisClient = new ServerClientConnection(this, socket);
-    printMessage("Client accepted: " + socket);
-    
-    try{
-      thisClient.open();
-      thisClient.start();
-      clients.put(thisClient.getHandle(), thisClient);
+    try {
+      clients.put(socket.getPort(), new ServerClientConnection(this, socket));
+      printMessage("Client accepted: " + socket);
     }
     catch (Exception e) {
       printMessage("Error attaching client: " + e);
@@ -331,7 +293,7 @@ public class Server {
 
     
     String configFile = defaultConfigFile;
-    String dbFile = defaultDbFile;
+    String accountsDBfile = defaultAccountsDbFile;
     
     
     if (cmd.hasOption("c")) {
@@ -345,16 +307,16 @@ public class Server {
         printErrorExit("Default config file does not exist: " + configFile);
     }
     if (cmd.hasOption("d")){
-      dbFile = cmd.getOptionValue("d");
-      File fileCheck = new File(dbFile);
+      accountsDBfile = cmd.getOptionValue("d");
+      File fileCheck = new File(accountsDBfile);
       if (!fileCheck.isFile())
-        printErrorExit("Specified database file does not exist: " + dbFile);
+        printErrorExit("Specified database file does not exist: " + accountsDBfile);
     } else {
-      File fileCheck = new File(dbFile);
+      File fileCheck = new File(accountsDBfile);
       if (!fileCheck.isFile())
-        printErrorExit("Default database file does not exist: " + dbFile);
+        printErrorExit("Default database file does not exist: " + accountsDBfile);
     }
 
-    Server server = new Server(configFile, dbFile);
+    Server server = new Server(configFile, accountsDBfile);
   }
 }
