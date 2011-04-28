@@ -423,12 +423,10 @@ public class Client {
         deleteOnServer(fname);
       } else if (Cgather.get(fname).equals("modified") || Cgather.get(fname).equals("created")) {
 
-         
         if ((new File(localDir + "/" + fname)).isDirectory()) {
           System.out.println(fname + " is a directory so it will be created on the server");
           createDirectoryOnServer(fname);
-        }
-        else {
+        } else {
 
           try {
             System.out.println("clientWantsToSend "+ fname);
@@ -512,16 +510,26 @@ public class Client {
         S.remove(name);
       } else {
 
-        if ((new File(localDir + "/" + name)).isDirectory()) {
-          System.out.println(name + " = create directory on server");
-          createDirectoryOnServer(name);
-        } else if (c.modtime > lastSync) {
-          System.out.println(name + " = transfer from client to server 2");
-          SendToServer.addFirst(c);
+        if (c.modtime > lastSync) {
+
+          if ((new File(localDir + "/" + name)).isDirectory()) {
+            System.out.println(name + " = create directory on server");
+            createDirectoryOnServer(name);
+          } else {
+            System.out.println(name + " = transfer from client to server 2");
+            SendToServer.addFirst(c);
+          }
+
         } else {
-          System.out.println(name + " = remove from client");
-          Common.deleteLocal(localDir + "/" + name);
-          //deleteLocal(name);
+
+          if ((new File(localDir + "/" + name)).isDirectory()) {
+            System.out.println(name + " = remove directory on client");
+            Common.deleteLocalDirectory(new File(localDir + "/" + name));
+          } else {
+            System.out.println(name + " = remove from client");
+            Common.deleteLocal(localDir + "/" + name);
+          }
+
         }
 
       }
@@ -530,15 +538,26 @@ public class Client {
     for (String name : S.keySet()) {  // which is now S-C
       MyFile s = S.get(name);
 
-      if (s.type.equals("directory")) {
-        System.out.println(name + " = create local directory on client");
-        Common.createLocalDirectory(localDir + "/" + name);        
-      } else if (s.modtime > lastSync) {
-        System.out.println(name + " = transfer from server to client 2");
-        requestFile(s.name);
+      if (s.modtime > lastSync) {
+
+        if (s.type.equals("directory")) {
+          System.out.println(name + " = create local directory on client");
+          Common.createLocalDirectory(localDir + "/" + name);
+        } else {
+          System.out.println(name + " = transfer from server to client 2");
+          requestFile(s.name);
+        }
+
       } else {
-        System.out.println(name + " = remove from server");
-        deleteOnServer(s.name);
+
+        if (s.type.equals("directory")) {
+          System.out.println(name + " = remove directory on server");
+          deleteOnServer(s.name);
+        } else {
+          System.out.println(name + " = remove from server");
+          deleteOnServer(s.name);
+        }
+
       }
     }
 

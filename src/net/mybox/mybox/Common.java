@@ -213,8 +213,15 @@ public class Common {
     return true;
   }
 
-
+  /**
+   * Delete a directory and its contents recursively
+   * @param path
+   * @return
+   */
   public static boolean deleteLocalDirectory(File path) {
+
+    // TODO: should we use apache.io file tools for these functions?
+
     if( path.exists() ) {
       File[] files = path.listFiles();
       for(int i=0; i<files.length; i++) {

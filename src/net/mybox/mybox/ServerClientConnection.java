@@ -23,11 +23,18 @@ package net.mybox.mybox;
 
 import java.net.*;
 import java.io.*;
+import java.sql.SQLException;
 import java.util.*;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import org.json.simple.*;
-import java.sql.*;
+//import java.sql.*;
+
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.Statement;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
 
 /**
  * This object is a thread instance mantained by the server that represents a connected client
@@ -53,6 +60,7 @@ public class ServerClientConnection {
   private static String fileDatabase = null;
   private static Connection connection = null;  // connection to file database
 
+  private static PreparedStatement preparedInsert = null;
 
   public ServerClientConnection(Server _server, Socket _socket) {
 
@@ -73,6 +81,7 @@ public class ServerClientConnection {
     // load the sqlite-JDBC driver using the current class loader
     try {
       Class.forName("org.sqlite.JDBC");
+      System.out.println(String.format("SQLiteJDBC is running in %s mode", org.sqlite.SQLiteJDBCLoader.isNativeMode() ? "OS native" : "pure-java"));
     } catch (Exception e) {
       System.out.println("Unable to load sqlite driver " + e.getMessage());
       System.exit(1);
@@ -97,12 +106,16 @@ public class ServerClientConnection {
         System.out.println("getting file: " + fileName + " modtime " + fileTime);
         File file=new File(localDir + "/" + fileName);
         ByteStream.toFile(inStream, file);
-        file.setLastModified(fileTime);
 
+        if (!file.setLastModified(fileTime)) {
+          System.err.println("Unable to set file modification time");
+          System.exit(1);
+        }
+        
         parent.spanCatchupOperation(handle, account.id, input, fileName);
       }
       catch (Exception e){
-        System.out.println("c2s operation failed: " + e.getMessage());
+        System.out.println(input.toString() + " operation failed: " + e.getMessage());
       }
     } else if (input == Common.Signal.clientWantsToSend) {
       try {
@@ -111,11 +124,12 @@ public class ServerClientConnection {
         long fileTime = Long.valueOf(fileTimeString);
 
         System.out.println("clientWantsToSend: " + fileName + " modtime " + fileTime);
-        File file=new File(localDir + "/" + fileName);
+        File file = new File(localDir + "/" + fileName);
 
         sendCommandToClient(Common.Signal.clientWantsToSend_response);
         ByteStream.toStream(outStream, fileName);
 
+        // reply 'yes' if it refers to a file that does not exist or if the times do not match
         if (file.isFile() && file.lastModified() == fileTime) {
           ByteStream.toStream(outStream, "no");
         } else {
@@ -123,7 +137,7 @@ public class ServerClientConnection {
         }
       }
       catch (Exception e){
-        System.out.println("c2s operation failed: " + e.getMessage());
+        System.out.println(input.toString() + " operation failed: " + e.getMessage());
       }
     } else if (input == Common.Signal.clientWants) {
       try {
@@ -131,11 +145,11 @@ public class ServerClientConnection {
         System.out.println("client requesting from server: " + fileName);
         File file = new File(localDir + "/" + fileName);
         if (file.exists()) {
-          outQueue.push(new MyFile(fileName, 10, "file", "s2c"));
+          outQueue.push(new MyFile(fileName, 10, "file"));
           checkQueue();
         }
       } catch (Exception e) {
-        System.out.println("clientWants operation failed: " + e.getMessage());
+        System.out.println(input.toString() + " operation failed: " + e.getMessage());
       }
     } else if (input == Common.Signal.deleteOnServer) {  // handles files and directories
       try {
@@ -151,7 +165,7 @@ public class ServerClientConnection {
 
         parent.spanCatchupOperation(handle, account.id, input, fileName);
       } catch (Exception e) {
-        System.out.println("deleteOnServer operation failed: " + e.getMessage());
+        System.out.println(input.toString() + " operation failed: " + e.getMessage());
       }
     } else if (input == Common.Signal.renameOnServer) {  // handles files and directories
       try {
@@ -167,7 +181,7 @@ public class ServerClientConnection {
         parent.spanCatchupOperation(handle, account.id, input, oldName + "->" + newName);
 
       } catch (Exception e) {
-        System.out.println("renameOnServer operation failed: " + e.getMessage());
+        System.out.println(input.toString() + " operation failed: " + e.getMessage());
       }
     } else if (input == Common.Signal.createDirectoryOnServer) {
       try {
@@ -175,9 +189,17 @@ public class ServerClientConnection {
         System.out.println("client requesting create directory on server: " + name);
         Common.createLocalDirectory(localDir + "/" + name);
 
+        // update database
+//        preparedInsert = connection.prepareStatement("insert or ignore into archive values(?,?,?);");
+//        preparedInsert.setString(1, name);
+//        preparedInsert.setString(2, "d");
+//        preparedInsert.setLong(3, (new Date()).getTime());
+//        preparedInsert.executeUpdate(); // TODO: check return number before continuing
+//        connection.commit();
+
         parent.spanCatchupOperation(handle, account.id, input, name);
       } catch (Exception e) {
-        System.out.println("createDirectoryOnServer operation failed: " + e.getMessage());
+        System.out.println(input.toString() + " operation failed: " + e.getMessage());
         System.exit(1);
       }
     } else if (input == Common.Signal.requestServerFileList) {
@@ -283,6 +305,29 @@ public class ServerClientConnection {
   }
 
 
+  HashMap<String, MyFile> getFilesFromDB() {
+    
+    HashMap<String, MyFile> files = new HashMap<String, MyFile>();
+
+    try {
+      Statement statement = connection.createStatement();
+      statement.setQueryTimeout(30);
+      ResultSet rs = statement.executeQuery("select * from archive");
+
+      while (rs.next()) {
+        MyFile myFile = new MyFile(rs.getString("name"));
+        myFile.modtime = rs.getLong("lastupdate");
+        myFile.setType(rs.getString("type").charAt(0));
+
+        files.put(myFile.name, myFile);
+      }
+    } catch (SQLException ex) {
+      Logger.getLogger(ServerClientConnection.class.getName()).log(Level.SEVERE, null, ex);
+    }
+
+    return files;
+  }
+
   private void sendServerFileList() {
 
     System.out.println("getting local file list for: " + localDir);
@@ -292,24 +337,36 @@ public class ServerClientConnection {
     // refresh the database
     try {
       statement = connection.createStatement();
-      statement.setQueryTimeout(30);  // set timeout to 30 sec.
+      statement.setQueryTimeout(30);
       
-      statement.executeUpdate("drop table if exists archive");
-      statement.executeUpdate("create table archive (name text, type char(1), lastupdate integer)");
+      statement.executeUpdate("create table if not exists archive (name text primary key, type char(1), lastupdate integer)");
     } catch (Exception e) {
-      System.out.println("Sqlite error: " + e.getMessage());
+      System.out.println("SQLite error: " + e.getMessage());
     }
     
     try {
       List<MyFile> files = Common.getFileListing(new File(localDir));
       
       JSONArray jsonArray = new JSONArray();
-
+      
+      PreparedStatement prep = connection.prepareStatement("insert or ignore into archive values(?,?,?);");
+      
       for (MyFile thisFile : files) {
         System.out.println(" " + thisFile.name);
-        statement.executeUpdate("insert into archive values('"+ thisFile.name +"', '"+ thisFile.getTypeChar() +"', "+ thisFile.modtime +")");
+
+        // TODO: do not insert directories that are already in the DB
+        //  compare against getFilesFromDB ?
+        
+        prep.setString(1, thisFile.name);
+        prep.setString(2, thisFile.getTypeChar()+"");
+        prep.setLong(3, thisFile.modtime);
+        prep.addBatch();
+
         jsonArray.add(thisFile.serialize());
       }
+
+      prep.executeBatch();
+      connection.commit();
 
       sendCommandToClient(Common.Signal.requestServerFileList_response);
       ByteStream.toStream(outStream, jsonArray.toJSONString());
@@ -329,7 +386,7 @@ public class ServerClientConnection {
     File fileObj = new File(localDir + "/" + myFile.name);
 
     try {
-      sendCommandToClient(Common.Signal.s2c); //myFile.action
+      sendCommandToClient(Common.Signal.s2c);
       ByteStream.toStream(outStream, myFile.name);
       ByteStream.toStream(outStream, fileObj.lastModified() + "");
       ByteStream.toStream(outStream, fileObj);
@@ -345,8 +402,8 @@ public class ServerClientConnection {
     System.out.println("Checking queue " + outQueue.size());
 
     if (outQueue.size() > 0) {
-      System.out.println("top queue action: " + outQueue.peek().action);
-      if (outQueue.peek().action.equals("s2c"))
+//      System.out.println("top queue action: " + outQueue.peek().action);
+//      if (outQueue.peek().action.equals("s2c"))
         sendFile(outQueue.pop());
     }
   }
@@ -393,6 +450,10 @@ public class ServerClientConnection {
     try {
       // create a database connection
       connection = DriverManager.getConnection("jdbc:sqlite:" + fileDatabase);
+      connection.setAutoCommit(false);
+
+      preparedInsert = connection.prepareStatement("insert or ignore into archive values(?,?,?);");
+
     } catch (Exception e) {
       return false;
     }
@@ -428,5 +489,11 @@ public class ServerClientConnection {
     if (outStream != null)
       outStream.close();
     
+    if(connection != null)
+      try {
+        connection.close();
+      } catch (SQLException ex) {
+        Logger.getLogger(ServerClientConnection.class.getName()).log(Level.SEVERE, null, ex);
+      }
   }
 }

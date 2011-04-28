@@ -63,6 +63,8 @@ public class ServerSetup {
     try {   input = br.readLine();   }    catch (Exception e) {   }
     if (!input.isEmpty())
       configFile = input; //catch
+
+    // TODO: set base storage directory
   }
 
   private boolean setupDirectories() {
@@ -99,25 +101,6 @@ public class ServerSetup {
     return true;
   }
 
-  /**
-   * Check various files and their permissions
-   * @return true if the check passed
-   */
-  private boolean checkFiles() {
-
-    // check for the unison command and make sure it can be executed
-
-//    File unisonCommand = new File(Server.serverUnisonCommand);
-//
-//    if (!unisonCommand.exists())
-//      return false;
-//
-//    if (!unisonCommand.canExecute())
-//      unisonCommand.setExecutable(true);
-
-    return true;
-  }
-
   private boolean createNewDB() {
 
     try {
@@ -134,14 +117,11 @@ public class ServerSetup {
   private ServerSetup() {
 
     Server.printMessage("Welcome to the Mybox server setup wizard");
-    // TODO: make sure they are the superuser
+    // TODO: make sure they are the superuser. or maybe the SU is no longer needed without unison?
     
     // TODO: add facility to create a new database
 
     gatherInput();
-
-    if (!checkFiles())
-      Server.printErrorExit("Unable to setup needed files.");
     
     if (!setupDirectories())
       Server.printErrorExit("Unable to setup directories. Make sure you run as super user.");

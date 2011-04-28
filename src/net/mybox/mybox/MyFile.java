@@ -26,12 +26,7 @@ public class MyFile {
 
 		public String name;
 		public long modtime;
-		public String type;
-		//public long size;
-
-    public String action; // send, recieve, delete, conflict, clientWants ?
-
-    // TODO overload > functions to compare times?
+		public String type; // TODO: make an enum
 
     public MyFile(String name) {
       this.name = name;
@@ -43,15 +38,18 @@ public class MyFile {
       this.type = type;
     }
 
-    public MyFile(String name, long modtime, String type, String action) {
-      this.name = name;
-      this.modtime = modtime;
-      this.type = type;
-      this.action = action;
-    }
     
     public String serialize() {
       return name + ";" + modtime + ";" + type;
+    }
+
+    public void setType(char typeChar) {
+      if (typeChar == 'd')
+        type = "directory";
+      else if(typeChar == 'l')
+        type = "link";
+      else
+        type = "file";
     }
 
     public char getTypeChar() {
@@ -76,6 +74,6 @@ public class MyFile {
 
   @Override
     public String toString() {
-      return type + " " + name + " (" + modtime + ")  action=" + action;
+      return type + " " + name + " (" + modtime + ")";
     }
 }

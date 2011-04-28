@@ -183,9 +183,11 @@ public class ByteStream {
         java.io.FileNotFoundException,
         java.io.IOException {
 
-    FileOutputStream fos=new FileOutputStream(file);
+    FileOutputStream fos = new FileOutputStream(file);
 
     toFile(ins, fos, len, 1024);
+
+    fos.close();
   }
 
   public static void toFile(InputStream ins, File file) throws
@@ -210,5 +212,7 @@ public class ByteStream {
       os.write(b, 0, numRead);
     }
     os.flush();
+
+    is.close();
   }
 }

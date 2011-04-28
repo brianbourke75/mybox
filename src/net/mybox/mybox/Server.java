@@ -48,7 +48,7 @@ public class Server {
 
   public static String defaultAccountsDbFile = null;
   public static String defaultConfigFile = null;
-  public static final String logFile = "/tmp/mybox_server.log";
+  public static final String logFile = System.getProperty("java.io.tmpdir") + "/mybox_server.log";
 
   public static String serverBaseDir = System.getProperty("user.home") + "/mbServerSpace";
 
