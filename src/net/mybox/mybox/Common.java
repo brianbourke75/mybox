@@ -404,6 +404,20 @@ public class Common {
     return result;
   }
 
+  /**
+   * Creates the directory if it does not exist
+   * @return true if the directory exists when the function returns, else false
+   */
+  public static boolean MakeDir(String dirpath) {
+
+    File baseDir = new File(dirpath);
+
+    if (!baseDir.exists())
+      if (!baseDir.mkdir())
+        return false;
+
+    return true;
+  }
 
   /**
    * Generate a random salt value to be used for encrypting a password

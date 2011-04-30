@@ -66,7 +66,7 @@ public class Client {
   public static final String logFileName = "mybox_client.log";
   public static final String lastSyncFileName = "lasysync.txt";
 
-  public static String configFile = null;
+  public static String configFile = null; // absolute path
   public static String logFile = null;
   public static String lastSyncFile = null;
   
@@ -128,6 +128,8 @@ public class Client {
   private void handleInput(Common.Signal operation) {
 
     System.out.println("input operation: " + operation.toString());
+
+    setStatus(ClientStatus.SYNCING);
 
     if (operation == Common.Signal.s2c) {
       try {
@@ -227,6 +229,8 @@ public class Client {
       printMessage("unknown command from server (" + operation +")");
     }
 
+    setStatus(ClientStatus.READY);
+
     lastReceivedOperation = operation;
   }
 
@@ -274,9 +278,12 @@ public class Client {
   public synchronized void checkQueue() {
 
     if (outQueue.size() > 0) {
+      setStatus(ClientStatus.SYNCING);
       sendFile(outQueue.pop());
       checkQueue();
     }
+
+    setStatus(ClientStatus.READY);
   }
 
   private synchronized void sendFile(MyFile myFile) {
@@ -695,14 +702,15 @@ public class Client {
    * Read the client config file and set this class's members accordingly
    * @param configFile
    */
-  private void readConfig(String configFile) {
+  public void Config(String configFile) {
 
     Properties properties = new Properties();
 
     try {
+      System.out.println("loading config from "+ configFile);
       properties.load(new FileInputStream(configFile));
     } catch (IOException e) {
-      // do something
+      printErrorExit("Error when loading config: " + e.getMessage());
     }
 
     // get values
@@ -952,7 +960,7 @@ public class Client {
 
     loadNativeLibs();
 
-    getLastSync();
+    getLastSync();  // TODO: handle false case
 
     enableDirListener();
     
@@ -1021,9 +1029,9 @@ public class Client {
     setStatus(ClientStatus.DISCONNECTED);
   }
 
-  public void config(String configFile) {
-    readConfig(configFile);
-  }
+//  public void config(String configFile) {
+//    readConfig(configFile);
+//  }
 
   
   public static void setConfigDir(String configDir) {
@@ -1099,7 +1107,7 @@ public class Client {
       System.err.println("Config file does not exist: " + configFile);
 
     Client client = new Client();
-    client.config(configFile);
+    client.Config(configFile);
     client.start();
   }
 

@@ -161,21 +161,11 @@ public class ClientSetup {
 
     Client.setConfigDir(configDir);
 
-    saveConfig();
+    if (!saveConfig())
+      System.err.println("Unable to save config file");
+    else
+      System.out.println("Setup finished successfully");
 
-    System.out.println("Setup finished successfully");
-
-  }
-
-
-  private static void setConfigDir(String configDir) {
-
-    if (!Common.createLocalDirectory(configDir)) {
-      System.err.println("Specified config directory could not be created: " + configDir);
-      System.exit(1);
-    }
-
-    Client.setConfigDir(configDir);
   }
 
   /**
@@ -185,7 +175,6 @@ public class ClientSetup {
   public static void main(String[] args) {
 
     Options options = new Options();
-//    options.addOption("c", "config", true, "configuration directory (will be created)");
     options.addOption("a", "apphome", true, "application home directory");
     options.addOption("h", "help", false, "show help screen");
     options.addOption("V", "version", false, "print the Mybox version");
@@ -225,12 +214,6 @@ public class ClientSetup {
 
       Client.updatePaths();
     }
-
-//    if (cmd.hasOption("c")) {
-//      configDir = cmd.getOptionValue("c");
-//    }
-//
-//    setConfigDir(configDir);
 
     ClientSetup setup = new ClientSetup();
 

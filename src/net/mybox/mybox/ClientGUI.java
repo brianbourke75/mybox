@@ -71,7 +71,7 @@ public class ClientGUI extends java.awt.Frame {
     jTabbedPrefs.setSelectedIndex(1); // show the messages first
 
     client = new Client();
-    client.config(configFile);
+    client.Config(configFile);
     client.clientGui = this;
 
 
@@ -431,7 +431,7 @@ public class ClientGUI extends java.awt.Frame {
       //System.exit(0);
     }//GEN-LAST:event_buttonCloseActionPerformed
 
-    static String configFile = null;
+    //static String configFile = null;
 
     /**
     * @param args the command line arguments
@@ -455,14 +455,14 @@ public class ClientGUI extends java.awt.Frame {
       } catch( Exception exp ) {
         System.err.println( exp.getMessage() );
         HelpFormatter formatter = new HelpFormatter();
-        formatter.printHelp( "Client", options );
+        formatter.printHelp( ClientGUI.class.getName(), options );
         return;
       }
 
 
       if (cmd.hasOption("h")) {
         HelpFormatter formatter = new HelpFormatter();
-        formatter.printHelp( Client.class.getName(), options );
+        formatter.printHelp( ClientGUI.class.getName(), options );
         return;
       }
 
@@ -495,7 +495,7 @@ public class ClientGUI extends java.awt.Frame {
       
       java.awt.EventQueue.invokeLater(new Runnable() {
         public void run() {
-          new ClientGUI(configFile);
+          new ClientGUI(Client.configFile);
         }
       });
     }

@@ -44,13 +44,15 @@ public class Server {
   public static int defaultQuota = 50;  // megabytes
   public static int port = Common.defaultCommunicationPort;
 
-  ServerDB accountsDb = null;
+  public AccountsDB accountsDb = null;
 
   public static String defaultAccountsDbFile = null;
   public static String defaultConfigFile = null;
+  public static String defaultBaseDataDir = System.getProperty("user.home") + "/mbServerSpace";
+  
   public static final String logFile = System.getProperty("java.io.tmpdir") + "/mybox_server.log";
-
-  public static String serverBaseDir = System.getProperty("user.home") + "/mbServerSpace";
+  public static String baseDataDir = null;
+  public static String accountsDbfile = null;
 
   static {
     updatePaths();
@@ -73,10 +75,14 @@ public class Server {
    * To be called at static init time, or after the global app home path has been changed
    */
   public static void updatePaths() {
-    defaultAccountsDbFile = Common.getAppHome() + "/mybox_server_db.xml";
+    defaultAccountsDbFile = Common.getAppHome() + "/mybox_server_accounts.db";
     defaultConfigFile = Common.getAppHome() + "/mybox_server.conf";
   }
 
+
+  public static String GetAbsoluteDataDirectory(AccountsDB.Account account) {
+    return baseDataDir + "/" + account.id;
+  }
   
   private static void log(String message) {
     // TODO: change this to be a static PrintWriter opened at construction time
@@ -114,7 +120,8 @@ public class Server {
     log(message + "\n");
   }
 
-  private void readConfig(String configFile) {
+
+  public static void LoadConfig(String configFile) {
     Properties properties = new Properties();
 
     try {
@@ -126,6 +133,16 @@ public class Server {
     port = Integer.parseInt(properties.getProperty("port"));  // returns NULL when not found
     defaultQuota = Integer.parseInt(properties.getProperty("defaultQuota"));
     maxClients = Integer.parseInt(properties.getProperty("maxClients"));
+    baseDataDir = properties.getProperty("baseDataDir");
+    accountsDbfile = properties.getProperty("accountsDbFile");
+
+    if (accountsDbfile == null)
+      accountsDbfile = defaultAccountsDbFile;
+    
+    if (baseDataDir == null)
+      baseDataDir = defaultBaseDataDir;
+
+    Common.MakeDir(baseDataDir);
 
   }
 
@@ -133,15 +150,16 @@ public class Server {
    * Constructor
    * @param configFile
    */
-  public Server(String configFile, String accountsDBfile) {
+  public Server(String configFile) {
 
     printMessage("Starting server");
     printMessage("config: " + configFile);
-    printMessage("database: " + accountsDBfile);
+    
+    LoadConfig(configFile);
 
-    accountsDb = new ServerDB(accountsDBfile);
+    printMessage("database: " + accountsDbfile);
 
-    readConfig(configFile);
+    accountsDb = new AccountsDB(accountsDbfile);
 
     try {
       printMessage("Binding to port " + port + ", please wait  ...");
@@ -252,7 +270,7 @@ public class Server {
 
     Options options = new Options();
     options.addOption("c", "config", true, "configuration file");
-    options.addOption("d", "database", true, "database file");
+//    options.addOption("d", "database", true, "accounts database file"); // TODO: handle in config?
     options.addOption("a", "apphome", true, "application home directory");
     options.addOption("h", "help", false, "show help screen");
     options.addOption("V", "version", false, "print the Mybox version");
@@ -271,7 +289,7 @@ public class Server {
 
     if (cmd.hasOption("h")) {
       HelpFormatter formatter = new HelpFormatter();
-      formatter.printHelp( Client.class.getName(), options );
+      formatter.printHelp( Server.class.getName(), options );
       return;
     }
 
@@ -291,32 +309,25 @@ public class Server {
       updatePaths();
     }
 
-    
     String configFile = defaultConfigFile;
-    String accountsDBfile = defaultAccountsDbFile;
-    
-    
+//    String accountsDBfile = defaultAccountsDbFile;
+
     if (cmd.hasOption("c")) {
       configFile = cmd.getOptionValue("c");
-      File fileCheck = new File(configFile);
-      if (!fileCheck.isFile())
-        printErrorExit("Specified config file does not exist: " + configFile);
-    } else {
-      File fileCheck = new File(configFile);
-      if (!fileCheck.isFile())
-        printErrorExit("Default config file does not exist: " + configFile);
-    }
-    if (cmd.hasOption("d")){
-      accountsDBfile = cmd.getOptionValue("d");
-      File fileCheck = new File(accountsDBfile);
-      if (!fileCheck.isFile())
-        printErrorExit("Specified database file does not exist: " + accountsDBfile);
-    } else {
-      File fileCheck = new File(accountsDBfile);
-      if (!fileCheck.isFile())
-        printErrorExit("Default database file does not exist: " + accountsDBfile);
     }
 
-    Server server = new Server(configFile, accountsDBfile);
+    File fileCheck = new File(configFile);
+    if (!fileCheck.isFile())
+      Server.printErrorExit("Config not found: " + configFile + "\nPlease run ServerSetup");
+
+//    if (cmd.hasOption("d")){
+//      accountsDBfile = cmd.getOptionValue("d");
+//    }
+//
+//    fileCheck = new File(accountsDBfile);
+//    if (!fileCheck.isFile())
+//      Server.printErrorExit("Error: account database not found " + accountsDBfile);
+
+    Server server = new Server(configFile);
   }
 }

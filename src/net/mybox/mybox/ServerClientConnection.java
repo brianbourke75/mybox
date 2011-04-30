@@ -41,13 +41,13 @@ import java.sql.ResultSet;
  */
 public class ServerClientConnection {
 
-  private Server parent = null;
+  private Server server = null;
   private Socket socket = null;
   private int handle = -1;
   public int failedRequestCount = 0;
 
   // TODO: make externally read only
-  public ServerDB.Account account = null;
+  public AccountsDB.Account account = null;
 
   private InputStream inStream = null;
   private DataInputStream dataInStream = null;
@@ -64,7 +64,7 @@ public class ServerClientConnection {
 
   public ServerClientConnection(Server _server, Socket _socket) {
 
-    parent = _server;
+    server = _server;
     socket = _socket;
     handle = socket.getPort();
 
@@ -112,7 +112,7 @@ public class ServerClientConnection {
           System.exit(1);
         }
         
-        parent.spanCatchupOperation(handle, account.id, input, fileName);
+        server.spanCatchupOperation(handle, account.id, input, fileName);
       }
       catch (Exception e){
         System.out.println(input.toString() + " operation failed: " + e.getMessage());
@@ -163,7 +163,7 @@ public class ServerClientConnection {
         else
           System.out.println("unable to find item on server to delete");
 
-        parent.spanCatchupOperation(handle, account.id, input, fileName);
+        server.spanCatchupOperation(handle, account.id, input, fileName);
       } catch (Exception e) {
         System.out.println(input.toString() + " operation failed: " + e.getMessage());
       }
@@ -178,7 +178,7 @@ public class ServerClientConnection {
           oldFile.renameTo(newFile);
         }
 
-        parent.spanCatchupOperation(handle, account.id, input, oldName + "->" + newName);
+        server.spanCatchupOperation(handle, account.id, input, oldName + "->" + newName);
 
       } catch (Exception e) {
         System.out.println(input.toString() + " operation failed: " + e.getMessage());
@@ -197,7 +197,7 @@ public class ServerClientConnection {
 //        preparedInsert.executeUpdate(); // TODO: check return number before continuing
 //        connection.commit();
 
-        parent.spanCatchupOperation(handle, account.id, input, name);
+        server.spanCatchupOperation(handle, account.id, input, name);
       } catch (Exception e) {
         System.out.println(input.toString() + " operation failed: " + e.getMessage());
         System.exit(1);
@@ -226,7 +226,7 @@ public class ServerClientConnection {
         jsonOut.put("quota", account.quota);
         jsonOut.put("salt", account.salt);
 
-        parent.updateMultiMap(account.id, handle);
+        server.updateMultiMap(account.id, handle);
       } else {
         jsonOut.put("status", "failed");
         jsonOut.put("error", "invalid account");
@@ -421,7 +421,7 @@ public class ServerClientConnection {
             handleInput(Common.Signal.get(dataInStream.readByte()));
           } catch (IOException ioe) {
             System.out.println("Client disconnected");
-            parent.removeAndTerminateConnection(handle);
+            server.removeAndTerminateConnection(handle);
             // assume this happens because the client socket disconnected
             return;
           }
@@ -434,18 +434,19 @@ public class ServerClientConnection {
   
   public boolean attachAccount(String email) {
 
-    account = parent.accountsDb.getAccountByEmail(email);
-    localDir = account.serverdir;
+    account = server.accountsDb.getAccountByEmail(email);
 
     if (account == null) {
       Server.printMessage("Account does not exist " + email); // TODO: return false?
       return false;
     }
+
+    localDir = server.GetAbsoluteDataDirectory(account);
     
     Server.printMessage("Attached account "+ account + " to handle " + handle);
-    Server.printMessage("Local server storage in: " + account.serverdir);
+    Server.printMessage("Local server storage in: " + localDir);
 
-    fileDatabase = Server.serverBaseDir + "/" + account.id + "_fileArchive.db"; // perhaps this does not beed to be global
+    fileDatabase = Server.baseDataDir + "/" + account.id + "_fileArchive.db"; // perhaps this does not beed to be global
     
     try {
       // create a database connection
@@ -468,7 +469,7 @@ public class ServerClientConnection {
     //  dataOutStream.flush();
     } catch (IOException ioe) {
       Server.printMessage(handle + " ERROR sending: " + ioe.getMessage());
-      parent.removeAndTerminateConnection(handle);
+      server.removeAndTerminateConnection(handle);
     }
   }
 
