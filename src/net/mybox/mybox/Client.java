@@ -21,19 +21,13 @@
 
 package net.mybox.mybox;
 
-import com.jcraft.jsch.*;
 import java.io.*;
 import java.net.*;
 import java.util.*;
-import org.apache.commons.lang.StringUtils;
 import org.apache.commons.cli.*;
 import org.json.simple.*;
+import org.json.simple.parser.*;
 
-/*
-enum WaitStatus {
-  FINISHED,WAITING
-}
- */
 
 /**
  * The status of the client
@@ -49,29 +43,557 @@ public class Client {
   
   // object state
   private Socket serverConnectionSocket = null;
-  private DataOutputStream streamToServer = null;
-  private ClientServerReceiver client = null; // server listener thread
+
+  private Thread clientInputListenerThread = null;
   private DirectoryListener dirListener = null;
   private GatherDirectoryUpdates gatherDirectoryUpdatesThread = null;
   private boolean waiting = false;
   public static Object clientGui = null;
-  private String receivedResponseCommand = null;
+  private Common.Signal lastReceivedOperation = null;
 
+  private OutputStream outStream = null;
+  private DataOutputStream dataOutStream = null;
+  private InputStream inStream = null;
+  private DataInputStream dataInStream = null;
+  
   // user settings
   private ClientAccount account = new ClientAccount();
 
-  // static system specific settings
-  private final String ServerDir = "Mybox";
   public static final String defaultClientDir = System.getProperty("user.home") + "/Mybox";
-  public static final String defaultConfigFile = System.getProperty("user.home") + "/mybox_client.conf";
+  public static final String defaultConfigDir = System.getProperty("user.home") + "/.mybox";
 
-  public String serverUnisonCommand = null;
-  public static String clientUnisonCommand;
-  public static String sshCommand;
+  public static final String configFileName = "mybox_client.conf";
+  public static final String logFileName = "mybox_client.log";
+  public static final String lastSyncFileName = "lasysync.txt";
+
+  public static String configFile = null; // absolute path
+  public static String logFile = null;
+  public static String lastSyncFile = null;
   
+  private static String localDir = null;  // data directory
+
+  // TODO: make this a list of only name=>action items instead of myfiles
+  // actually queue should eventually only be a list of files to send
+  public LinkedList<MyFile> outQueue = new LinkedList<MyFile>();
+  
+  private long lastSync = 0;
+
+  public HashMap<String, MyFile> S = new HashMap<String, MyFile>();  // serverFileList
+  public HashMap<String, MyFile> C = new HashMap<String, MyFile>();  // clientFileList
+
+  // filename(s) => actions
+  public HashMap<String, String> Cgather = new HashMap<String, String>();
+
+
   static {
     updatePaths();
   }
+
+
+  // FILE CLIENT METHODS
+
+
+  private synchronized boolean updateLastSync() {
+    lastSync = (new Date()).getTime();
+
+    try {
+      FileOutputStream fos = new FileOutputStream(lastSyncFile);
+      DataOutputStream dos = new DataOutputStream(fos);
+      dos.writeLong(lastSync);
+      dos.close();
+    }
+    catch (Exception e) {
+      return false;
+    }
+    
+    return true;
+  }
+  
+  private boolean getLastSync() {
+
+    try {
+      FileInputStream fin = new FileInputStream(lastSyncFile);
+      DataInputStream din = new DataInputStream(fin);
+      lastSync = din.readLong();
+      din.close();
+    }
+    catch (Exception e) {
+      return false;
+    }
+
+    return true;
+  }
+
+
+  private void handleInput(Common.Signal operation) {
+
+    System.out.println("input operation: " + operation.toString());
+
+    setStatus(ClientStatus.SYNCING);
+
+    if (operation == Common.Signal.s2c) {
+      try {
+        String file_name = ByteStream.toString(inStream);
+        String fileTimeString = ByteStream.toString(inStream);
+        long fileTime = Long.valueOf(fileTimeString);
+
+        System.out.println("getting file: " + file_name);
+
+        File file=new File(localDir + "/" + file_name);
+        ByteStream.toFile(inStream, file);
+        file.setLastModified(fileTime);
+
+      }
+      catch (Exception e){
+        System.out.println("Operation failed: " + e.getMessage());
+      }
+    } else if (operation == Common.Signal.deleteOnClient) {  // catchup operation
+      try {
+        String name = ByteStream.toString(inStream);
+        Common.deleteLocal(localDir +"/"+ name);  // should assess return value
+      }
+      catch (Exception e){
+        System.out.println("Operation failed: " + e.getMessage());
+      }
+
+    } else if (operation == Common.Signal.renameOnClient) {  // catchup operation
+      try {
+        String arg = ByteStream.toString(inStream);
+        String[] args = arg.split("->");
+        System.out.println("rename: " + args[0] + " to " + args[1]);
+        Common.renameLocal(localDir +"/"+ args[0], localDir +"/"+ args[1]);
+      }
+      catch (Exception e){
+        System.out.println("Operation failed: " + e.getMessage());
+      }
+
+    } else if (operation == Common.Signal.createDirectoryOnClient) {  // catchup operation
+      try {
+        String name = ByteStream.toString(inStream);
+        Common.createLocalDirectory(localDir +"/"+ name);
+      }
+      catch (Exception e){
+        System.out.println("Operation failed: " + e.getMessage());
+      }
+
+    } else if (operation == Common.Signal.clientWantsToSend_response) {
+      try {
+        String name = ByteStream.toString(inStream);
+        String response = ByteStream.toString(inStream);
+
+        System.out.println("clientWantsToSend_response: " + name + " = " + response);
+
+        if (response.equals("yes")) {
+          outQueue.push(new MyFile(name));
+          checkQueue();
+        }
+      }
+      catch (Exception e){
+        System.out.println("Operation failed: " + e.getMessage());
+      }
+
+    } else if (operation == Common.Signal.requestServerFileList_response) {
+
+      try {
+        String jsonString = ByteStream.toString(inStream);
+        S = decodeFileList(jsonString);
+        System.out.println("Recieved jsonarray: " + jsonString);
+      } catch (Exception e) {
+        System.out.println("Exception while recieving jsonArray");
+      }
+    } else if (operation == Common.Signal.attachaccount_response) {
+
+      String jsonString = null;
+      
+      try {
+        jsonString = ByteStream.toString(inStream);
+      } catch (Exception e) {
+        //
+      }
+
+      HashMap map = Common.jsonDecode(jsonString);
+
+      if (!((String)map.get("status")).equals("success"))
+        printWarning("Unable to attach account. Server response: "+ map.get("error"));
+      else {
+        account.salt= (String)map.get("salt");
+        System.out.println("set account salt to: " + account.salt);
+        
+        // inline check of mybox versions
+        if (!Common.appVersion.equals((String)map.get("serverMyboxVersion")))
+          printErrorExit("Client and Server Mybox versions do not match");
+      }
+
+    }
+    else {
+      printMessage("unknown command from server (" + operation +")");
+    }
+
+    setStatus(ClientStatus.READY);
+
+    lastReceivedOperation = operation;
+  }
+
+  /**
+   * Decode a JSON string array into a Hash file list
+   * @param input
+   * @return
+   */
+  public static HashMap<String, MyFile> decodeFileList(String input) {
+
+    HashMap<String, MyFile> result = new HashMap<String, MyFile>();
+
+    JSONParser parser = new JSONParser();
+    ContainerFactory containerFactory = new ContainerFactory(){
+      @Override
+      public List creatArrayContainer() {
+        return new LinkedList();
+      }
+      @Override
+      public Map createObjectContainer() {
+        return new LinkedHashMap();
+      }
+    };
+
+    try {
+      List thisList = (List)parser.parse(input, containerFactory);
+
+      Iterator iter = thisList.iterator();
+      while(iter.hasNext()){
+        String serialized = (String)iter.next();
+        MyFile myFile = MyFile.fromSerial(serialized);
+        result.put(myFile.name, myFile);
+      }
+    }
+    catch(Exception pe){
+      System.out.println(pe);
+    }
+
+    return result;
+  }
+
+  /**
+   * Check the outgoing queue and send files from it, if it is unempty
+   */
+  public synchronized void checkQueue() {
+
+    if (outQueue.size() > 0) {
+      setStatus(ClientStatus.SYNCING);
+      sendFile(outQueue.pop());
+      checkQueue();
+    }
+
+    setStatus(ClientStatus.READY);
+  }
+
+  private synchronized void sendFile(MyFile myFile) {
+
+    System.out.println("sending file " + myFile.name);
+
+    File fileObj = new File(localDir + "/" + myFile.name);
+
+    try {
+      sendCommandToServer(Common.Signal.c2s);
+      ByteStream.toStream(outStream, myFile.name);
+      ByteStream.toStream(outStream, fileObj.lastModified() +"");
+      ByteStream.toStream(outStream, fileObj);
+    } catch (Exception e) {
+      System.out.println("error sending file");
+    }
+  }
+
+
+  /**
+   * Delete an item on the server. A file or directory.
+   * @param name
+   */
+  private synchronized void deleteOnServer(String name) {
+
+    System.out.println("Telling server to delete item " + name);
+
+    try{
+      sendCommandToServer(Common.Signal.deleteOnServer);
+      ByteStream.toStream(outStream, name);
+    } catch (Exception e) {
+      System.out.println("error requesting server item delete");
+    }
+  }
+  
+  private synchronized void renameOnServer(String oldName, String newName) {
+    System.out.println("Telling server to rename file " + oldName + " to " + newName);
+
+    try{
+      sendCommandToServer(Common.Signal.renameOnServer);
+      ByteStream.toStream(outStream, oldName);
+      ByteStream.toStream(outStream, newName);
+    } catch (Exception e) {
+      System.out.println("error requesting server file rename");
+    }
+  }
+
+
+  private synchronized void createDirectoryOnServer(String name) {
+    System.out.println("Telling server to create directory " + name);
+
+    try{
+      sendCommandToServer(Common.Signal.createDirectoryOnServer);
+      ByteStream.toStream(outStream, name);
+    } catch (Exception e) {
+      System.out.println("error requesting server directory create");
+    }
+  }
+
+  private synchronized void requestFile(String name) {
+    System.out.println("Requesting file " + name);
+
+    try{
+      sendCommandToServer(Common.Signal.clientWants);
+      ByteStream.toStream(outStream, name);
+    } catch (Exception e) {
+      System.out.println("error requesting file");
+    }
+  }
+
+  private void showQueue() {
+    System.out.println("Showing queue");
+    for (MyFile myFile : outQueue) {
+      System.out.println(myFile);
+    }
+  }
+
+
+  private void populateLocalFileList() {
+    try {
+      List<MyFile> files = Common.getFileListing(new File(localDir));
+
+      JSONArray jsonArray = new JSONArray();
+
+      for (MyFile thisFile : files) {
+        System.out.println(" " + thisFile.name);
+        C.put(thisFile.name, thisFile);
+      }
+
+    } catch (Exception e) {
+      System.out.println("Error populating local file list " + e.getMessage());
+    }
+
+  }
+
+
+  /**
+   * Start a new thread for getting input from the server
+   */
+  private void startClientInputListenerThread() {
+
+    //if (clientInputListenerThread != null)
+    //  return;
+
+    clientInputListenerThread =
+
+    new Thread(new Runnable() {
+      @Override
+      public void run() {
+
+        while (true) {
+          try {
+            System.out.println("Client waiting for command");
+            handleInput(Common.Signal.get( dataInStream.readByte() ));
+          } catch (IOException ioe) {
+            System.out.println("Listening error in ClientInThread: " + ioe.getMessage());
+            clientInputListenerThread = null;
+            attemptConnection(5);
+            // TODO: make this reconnection work
+          }
+        }
+
+      }
+    });
+
+    clientInputListenerThread.start();
+  }
+
+
+  /**
+   * This is the sync method that is used when the client is already running.
+   */
+  private synchronized void GatherSync() {
+    
+    setStatus(ClientStatus.SYNCING);
+
+    printMessage("Gather sync started  " + Common.now() );
+    
+    for (String fname : Cgather.keySet()) {
+      if (Cgather.get(fname).equals("renamed")) {
+        String[] names = fname.split("->");
+        renameOnServer(names[0], names[1]);
+      } else if (Cgather.get(fname).equals("deleted")) {
+        deleteOnServer(fname);
+      } else if (Cgather.get(fname).equals("modified") || Cgather.get(fname).equals("created")) {
+
+        if ((new File(localDir + "/" + fname)).isDirectory()) {
+          System.out.println(fname + " is a directory so it will be created on the server");
+          createDirectoryOnServer(fname);
+        } else {
+
+          try {
+            System.out.println("clientWantsToSend "+ fname);
+            sendCommandToServer(Common.Signal.clientWantsToSend);
+            ByteStream.toStream(outStream, fname);
+            ByteStream.toStream(outStream, (new File(localDir + "/" + fname)).lastModified() +"");
+          } catch (Exception e) {
+            //
+          }
+        }
+        
+        
+      }
+    }
+
+    updateLastSync();
+
+    System.out.println("Setting lasySync to " + lastSync); // actually, it is not done until all incoming finish
+
+    Cgather.clear();
+      
+    printMessage("Sync finished " + Common.now() );
+
+    setStatus(ClientStatus.READY);
+  }
+
+  public synchronized void FullSync() {
+
+    printMessage("disabling listener");
+    disableDirListener(); // hack while incoming set gets figured out
+
+    setStatus(ClientStatus.SYNCING);
+
+    printMessage("Full sync started  " + Common.now() );
+
+    // TODO: if lastSysc is 0 or bogus, favoror file creations over deletions
+    // TODO: update all time comparisons to respect server/client time differences
+
+    populateLocalFileList();
+    boolean listReturned = serverDiscussion(Common.Signal.requestServerFileList,
+            Common.Signal.requestServerFileList_response, null);
+
+    if (!listReturned) {
+      printErrorExit("requestServerFileList did not return in time");
+    }
+
+    System.out.println("comparing C=" + C.size() + " to S="+ S.size());
+
+    LinkedList<MyFile> SendToServer = new LinkedList<MyFile>();
+
+    // strange case = when there is the same name item but it is a file on the client and dir on server
+
+    for (String name : C.keySet()) {
+
+      MyFile c = C.get(name);
+
+      if (S.containsKey(name)) {
+        MyFile s = S.get(name);
+
+        // if it is not a directory and the times are different, compare times
+        if (!(new File(localDir + "/" + name)).isDirectory() && c.modtime != s.modtime) {
+          
+          System.out.println(name + " "+lastSync+" c.modtime=" + c.modtime + " s.modtime=" + s.modtime);
+          
+          if (c.modtime > lastSync) {
+            if (s.modtime > lastSync) {
+              System.out.println(name + " = conflict type 1");
+            } else {
+              System.out.println(name + " = transfer from client to server 1");
+              SendToServer.addFirst(c);
+            }
+          } else {
+            if (s.modtime > c.modtime) {
+              System.out.println(name + " = transfer from server to client 1");
+              requestFile(s.name);
+            } else {
+              System.out.println(name + " = conflict type 2");
+            }
+          }
+        }
+        S.remove(name);
+      } else {
+
+        if (c.modtime > lastSync) {
+
+          if ((new File(localDir + "/" + name)).isDirectory()) {
+            System.out.println(name + " = create directory on server");
+            createDirectoryOnServer(name);
+          } else {
+            System.out.println(name + " = transfer from client to server 2");
+            SendToServer.addFirst(c);
+          }
+
+        } else {
+
+          if ((new File(localDir + "/" + name)).isDirectory()) {
+            System.out.println(name + " = remove directory on client");
+            Common.deleteLocalDirectory(new File(localDir + "/" + name));
+          } else {
+            System.out.println(name + " = remove from client");
+            Common.deleteLocal(localDir + "/" + name);
+          }
+
+        }
+
+      }
+    }
+
+    for (String name : S.keySet()) {  // which is now S-C
+      MyFile s = S.get(name);
+
+      if (s.modtime > lastSync) {
+
+        if (s.type.equals("directory")) {
+          System.out.println(name + " = create local directory on client");
+          Common.createLocalDirectory(localDir + "/" + name);
+        } else {
+          System.out.println(name + " = transfer from server to client 2");
+          requestFile(s.name);
+        }
+
+      } else {
+
+        if (s.type.equals("directory")) {
+          System.out.println(name + " = remove directory on server");
+          deleteOnServer(s.name);
+        } else {
+          System.out.println(name + " = remove from server");
+          deleteOnServer(s.name);
+        }
+
+      }
+    }
+
+
+    System.out.println("SendToServer");
+    for (MyFile item : SendToServer) {
+      outQueue.addFirst(item);
+      System.out.println(item);
+    }
+
+    checkQueue();
+
+    updateLastSync(); // TODO: this shoud actually happen after all inbound have finished
+
+    System.out.println("Setting lasySync to " + lastSync);
+
+    C.clear();
+    S.clear();
+
+    printMessage("enableing listener since sync is done");
+    enableDirListener();
+    
+    printMessage("Sync finished " + Common.now() );
+
+    setStatus(ClientStatus.READY);
+  }
+
+
+
 
   /**
    * Set paths to local files based on the home application path
@@ -82,23 +604,15 @@ public class Client {
 
     String osName = System.getProperty("os.name").toLowerCase();
 
-		if (osName.equals("linux")){
-      clientUnisonCommand = incPath + "/unison-2.27.57-linux";
-      sshCommand = incPath + "/ssh-ident.bash";
-		}
-		else if (osName.startsWith("windows")){
-      clientUnisonCommand = incPath + "/unison-2.27.57-win_gui.exe";
-//      sshCommand = "inc" + "\\ssh-ident.bat";
-      sshCommand = incPath + System.getProperty("file.separator") + "ssh-ident.bat";
-        // TODO: make this path absolute. might be a unison argument parsing bug
-		}
-    else if (osName.startsWith("mac os x")){
-      clientUnisonCommand = incPath + "/unison-2.40.61-macXX";
-      sshCommand = incPath + "/ssh-ident.bash";
-		}
-    else {
-			throw new RuntimeException("Unsupported operating system: " + osName);
-		}
+    if (osName.equals("linux")) {
+      
+    } else if (osName.startsWith("windows")) {
+      
+    } else if (osName.startsWith("mac os x")) {
+      
+    } else {
+      throw new RuntimeException("Unsupported operating system: " + osName);
+    }
 
   }
 
@@ -122,7 +636,26 @@ public class Client {
 
 
   // helpers
+
+
+  private static void log(String message) {
+    // TODO: change this to be a static PrintWriter opened at construction time
+    PrintWriter out = null;
+
+    try {
+      out = new PrintWriter(new FileWriter(logFile, true));
+    } catch (Exception e) {
+      System.out.println("Unable to open log file: " + e);
+    }
+
+    out.println(message);
+
+    out.close();
+  }
+
   public static void printErrorExit(String message) {
+
+    log(message);
     if (clientGui == null) {
       System.out.println(message);
       System.exit(1);
@@ -132,6 +665,7 @@ public class Client {
   }
 
   public static void printMessage_(String message) {
+    log(message);
     if (clientGui == null)
       System.out.print(message);
     else if (clientGui instanceof ClientGUI)
@@ -139,6 +673,7 @@ public class Client {
   }
 
   public static void printMessage(String message) {
+    log(message);
     if (clientGui == null)
       System.out.println(message);
     else if (clientGui instanceof ClientGUI)
@@ -146,6 +681,7 @@ public class Client {
   }
 
   public static void printWarning(String message) {
+    log(message);
     System.out.println(message);
   }
 
@@ -166,14 +702,15 @@ public class Client {
    * Read the client config file and set this class's members accordingly
    * @param configFile
    */
-  private void readConfig(String configFile) {
+  public void Config(String configFile) {
 
     Properties properties = new Properties();
 
     try {
+      System.out.println("loading config from "+ configFile);
       properties.load(new FileInputStream(configFile));
     } catch (IOException e) {
-      // do something
+      printErrorExit("Error when loading config: " + e.getMessage());
     }
 
     // get values
@@ -198,6 +735,8 @@ public class Client {
     File dirTest = new File(account.directory);
     if (!dirTest.exists())
       printErrorExit("Directory " + account.directory +" does not exist");
+
+    localDir = account.directory;
   }
 
   /**
@@ -214,7 +753,7 @@ public class Client {
    */
   public void unpause() {
     enableDirListener();
-    sync();
+    FullSync();
   }
 
   /**
@@ -236,81 +775,18 @@ public class Client {
       dirListener.pause();
   }
 
-  /**
-   * Perform a directory sync from this client to the server
-   */
-  public void sync() {
-    setStatus(ClientStatus.SYNCING);
-    printMessage("Syncing client");
-
-    printMessage("Sync started  " + Common.now() );
-
-    String[] commandArr = new String[]{clientUnisonCommand, "-auto","-batch",
-            //"-debug","verbose",
-            "-sshcmd", sshCommand, "-perms", "0", "-servercmd",serverUnisonCommand,
-            account.directory, "ssh://"+ account.serverPOSIXaccount +"@"+ account.serverName +"/" + ServerDir};
-
-    Common.syscommand(commandArr);
-
-    printMessage("Sync finished " + Common.now() );
-
-    setStatus(ClientStatus.READY);
-  }
 
   /**
    * Send a message to the server
-   * @param msg
+   * @param command
    */
-  public void sendMessageToServer(String msg) {
+  public void sendCommandToServer(Common.Signal signal) {
     try {
-      streamToServer.writeUTF(msg);
-      streamToServer.flush();
+      dataOutStream.writeByte(signal.index());
+      //dataOutStream.flush();
     } catch (Exception e) {
-      printWarning("Sending error: " + e.getMessage());
+      printWarning("Sending error for ("+ signal.toString() +"): " + e.getMessage());
     }
-  }
-
-  /**
-   * Handle message sent from the server to this client
-   * @param msg
-   */
-  public void handleMessageFromServer(String msg) {
-
-    printMessage("(" + Common.now() + ") Server: " + msg);
-
-    String[] iArgs = msg.split(" ");
-
-    String command = iArgs[0];
-    String args = StringUtils.join(iArgs, " ", 1, iArgs.length);
-
-    if (command.endsWith("_response")) {
-      receivedResponseCommand = command;
-    }
-
-    if (command.equals("attachaccount_response")) {
-
-      HashMap map = Common.jsonDecode(args);
-
-      if (!((String)map.get("status")).equals("success"))
-        printWarning("Unable to attach account. Server response: "+ map.get("error"));
-      else {
-        account.serverPOSIXaccount = (String)map.get("serverPOSIXaccount");
-        account.salt= (String)map.get("salt");
-        serverUnisonCommand = (String)map.get("serverUnisonCommand");
-        printMessage("Set POSIXaccount to " + account.serverPOSIXaccount);
-      }
-
-    } else if (msg.equals("sync")) {
-      printMessage("disabling listener");
-      disableDirListener();
-      sync();
-      printMessage("enableing listener since sync is done");
-      enableDirListener();
-    }
-    else {
-      printMessage("unknown command from server");
-    }
-
   }
 
   /**
@@ -318,18 +794,28 @@ public class Client {
    */
   public void waitHasFinished() {
     waiting = false;
-    sync();
 
-    // this happens when the sync is done since sync() waits
-    sendMessageToServer("syncfinished");
+    Client.printMessage("GatherDirectoryUpdates has finished");
+
+    GatherSync();
   }
   
   /**
    * Called whenever a file in the directory is updated
-   * @param msg
+   * @param action
+   * @param items
    */
-  public void directoryUpdate(String msg) {
-    printMessage("DirectoryUpdate " + msg);
+  public void directoryUpdate(String action, String items) {
+    printMessage("DirectoryUpdate " + action + " " + items);
+
+    if (items.charAt(items.length()-1) == '/') { // hack: remove trailing slash from jnotify?
+      items = items.substring(0, items.length()-1);
+      System.out.println("chop result: " + items);
+    }
+    if (Cgather.containsKey(items) && Cgather.get(items).equals(action))
+      ; // dont bother adding it to the list since it is already there
+    else
+      Cgather.put(items, action); // this should overwrite items that area already in the list
 
     if (gatherDirectoryUpdatesThread != null && waiting)
       gatherDirectoryUpdatesThread.deactivate();
@@ -340,41 +826,45 @@ public class Client {
 
   /**
    * This is a helper function for ClientSetup that makes a quick connection to the server
-   * just so the ssh user can be determined.
+   * just so the account can be determined.
    * @param serverName
    * @param serverPort
    * @param email
    * @return The account
    */
-  public ClientAccount startGetAccountMode(String serverName, int serverPort, String email) {
+  public ClientAccount startGetAccountMode(String serverName, int serverPort, String email, String dataDir) {
 
-    if (serverName == null)
-      printErrorExit("Client not configured");
-    
+    if (serverName == null) {
+      System.err.println("Client not configured");
+      System.exit(1);
+    }
+
     account.serverName = serverName;
     account.serverPort = serverPort;
     account.email = email;
+    account.directory = dataDir;
 
-    printMessage("Establishing connection to port "+ serverPort +". Please wait ...");
+    account.salt = "0"; // temp hack
+
+    System.out.println("Establishing connection to port "+ serverPort +". Please wait ...");
 
     try {
       serverConnectionSocket = new Socket(account.serverName, account.serverPort);
-      printMessage("Connected: " + serverConnectionSocket);
-      streamToServer = new DataOutputStream(serverConnectionSocket.getOutputStream());
+      System.out.println("Connected: " + serverConnectionSocket);
+      dataOutStream = new DataOutputStream(serverConnectionSocket.getOutputStream());
     } catch (UnknownHostException uhe) {
-      printErrorExit("Host unknown: " + uhe.getMessage());
+      System.err.println("Host unknown: " + uhe.getMessage());
+      System.exit(1);
     } catch (IOException ioe) {
-      printErrorExit("Unexpected exception: " + ioe.getMessage());
+      System.err.println("Unexpected exception: " + ioe.getMessage());
+      System.exit(1);
     }
 
     JSONObject jsonOut = new JSONObject();
     jsonOut.put("email", account.email);
 //    jsonOut.put("password", password);
 
-    client = new ClientServerReceiver(this, serverConnectionSocket);
-
-    if (!serverDiscussion("attachaccount " + jsonOut) || account.serverPOSIXaccount == null)
-      printErrorExit("Unable to determine server POSIX account");
+//    client = new ClientServerReceiver(this, serverConnectionSocket);
 
     return account;
   }
@@ -385,28 +875,41 @@ public class Client {
    * @param messageToServer
    * @return false if no response
    */
-  public boolean serverDiscussion(String messageToServer) {
+  public boolean serverDiscussion(Common.Signal messageToServer, Common.Signal expectedReturnCommand, String argument) {
 
     int pollseconds = 1;
-    int pollcount = 10;
+    int pollcount = 20;
 
-    String[] iArgs = messageToServer.split(" ");
-    String expectedReturnCommand = iArgs[0] + "_response";
+    System.out.println("serverDiscussion starting with expected return: " + expectedReturnCommand.toString());
+    System.out.println("serverDiscussion sending message to server: " + messageToServer.toString());
 
-    sendMessageToServer(messageToServer);
+    sendCommandToServer(messageToServer);
+    if (argument != null) {
+      try {
+        ByteStream.toStream(outStream, argument);
+      }
+      catch (Exception e) {
+        //
+      }
+    }
 
     for (int i=0; i<pollcount; i++){
       try{Thread.sleep(pollseconds * 1000);}catch(Exception ee){}
-      if (expectedReturnCommand.equals(receivedResponseCommand)) {
-        receivedResponseCommand = null;
+      if (expectedReturnCommand == (lastReceivedOperation)) {
+        System.out.println("serverDiscussion returning true with: " + lastReceivedOperation);
+        lastReceivedOperation = null;
         return true;
       }
     }
 
-    receivedResponseCommand = null;
+    System.out.println("serverDiscussion returning false");
+    lastReceivedOperation = null;
 
     return false;
   }
+
+
+
 
   /**
    * Attempt to connect to the server port and attach the user
@@ -425,7 +928,13 @@ public class Client {
     while (true) {
       try {
         serverConnectionSocket = new Socket(account.serverName, account.serverPort);
-        streamToServer = new DataOutputStream(serverConnectionSocket.getOutputStream());
+
+        outStream = serverConnectionSocket.getOutputStream();
+        inStream = serverConnectionSocket.getInputStream();
+
+        dataOutStream = new DataOutputStream(outStream);
+        dataInStream = new DataInputStream(inStream);
+
         break; // reachable if there is no exception thrown
       } catch (IOException ioe) {
         printMessage("There was an error reaching server. Will try again in " + pollInterval + " seconds...");
@@ -434,34 +943,24 @@ public class Client {
     }
     
     printMessage("Connected: " + serverConnectionSocket);
-    
-    client = new ClientServerReceiver(this, serverConnectionSocket);
+
+    startClientInputListenerThread();
 
     JSONObject jsonOut = new JSONObject();
     jsonOut.put("email", account.email);
 //    jsonOut.put("password", password);
-
-    if (!serverDiscussion("attachaccount " + jsonOut) || account.serverPOSIXaccount == null)
-      printErrorExit("Unable to determine ssh account");
     
-    // check that the unison versions are the same. this also makes sure that the SSH keys work and that unison is installed
+    // TODO: make sure if the attachAccount fails, no files can be transfered
+    
+    if (!serverDiscussion(Common.Signal.attachaccount,
+            Common.Signal.attachaccount_response, jsonOut.toString()))
+      printErrorExit("Unable to attach account");
 
-    SysResult runLocalUnisonChech = Common.syscommand(new String[]{Client.clientUnisonCommand, "-version"});
-    if (runLocalUnisonChech.returnCode != 0)
-        printErrorExit("Unable to determine local unison version");
-
-    SysResult runServerUnisonCheck = Common.syscommand(new String[]{sshCommand, account.serverPOSIXaccount +
-            "@" + account.serverName, serverUnisonCommand, "-version"});
-    //sshCommand + " " + SSHuser + "@" + ServerName
-    //        + " " + serverUnisonCommand + " -version");
-    if (runServerUnisonCheck.returnCode != 0)
-        printErrorExit("Unable to contact server to detect unison version");
-
-    if (!runServerUnisonCheck.output.equalsIgnoreCase(runLocalUnisonChech.output)) {
-      printErrorExit("The server and client are running different versions of unison");
-    }
+    // checking that the mybox versions are the same happens in handleMessageFromServer
 
     loadNativeLibs();
+
+    getLastSync();  // TODO: handle false case
 
     enableDirListener();
     
@@ -469,7 +968,7 @@ public class Client {
     setStatus(ClientStatus.READY);
 
     // perform an initial sync to catch all the files that have changed while the client was off
-    sync();
+    FullSync();
   }
 
   public void start() {
@@ -478,23 +977,23 @@ public class Client {
 
   public void stop() {
 
-    printMessage("Stopping client");
+//    printMessage("Stopping client");
     setStatus(ClientStatus.DISCONNECTED);
 
     try {
-
+/*
       if (client != null) {
         client.close();
         client = null;
       }
-      
+  */
       if (serverConnectionSocket != null) {
         serverConnectionSocket.close();
         serverConnectionSocket = null;
       }
       
-      if (streamToServer != null) {
-        streamToServer.close();
+      if (dataOutStream != null) {
+        dataOutStream.close();
       }
     } catch (IOException ioe) {
       printWarning("Error closing ...");
@@ -527,13 +1026,27 @@ public class Client {
    * Constructor
    */
   public Client() {
-	  setStatus(ClientStatus.DISCONNECTED);
+    setStatus(ClientStatus.DISCONNECTED);
   }
 
-  public void config(String configFile) {
-    readConfig(configFile);
-  }
+//  public void config(String configFile) {
+//    readConfig(configFile);
+//  }
 
+  
+  public static void setConfigDir(String configDir) {
+    
+    if (!(new File(configDir)).isDirectory()) {
+      System.err.println("Specified config directory does not exist: " + configDir);
+      System.exit(1);
+    }
+    configFile = configDir + "/" + configFileName;
+    logFile = configDir + "/" + logFileName;
+    lastSyncFile = configDir + "/" + lastSyncFileName;
+
+    System.out.println("Set configFile to " + configFile);
+
+  }
 
   /**
    * Handle the command line args and instantiate the Client
@@ -542,13 +1055,15 @@ public class Client {
   public static void main(String args[]) {
 
     Options options = new Options();
-    options.addOption("c", "config", true, "configuration file");
+    options.addOption("c", "config", true, "configuration directory (default=~/.mybox)");
     options.addOption("a", "apphome", true, "application home directory");
     options.addOption("h", "help", false, "show help screen");
     options.addOption("V", "version", false, "print the Mybox version");
 
     CommandLineParser line = new GnuParser();
     CommandLine cmd = null;
+
+    String configDir = defaultConfigDir;
 
     try {
       cmd = line.parse(options, args);
@@ -581,282 +1096,20 @@ public class Client {
       updatePaths();
     }
 
-    String configFile = defaultConfigFile;
-
     if (cmd.hasOption("c")) {
-      configFile = cmd.getOptionValue("c");
-      File fileCheck = new File(configFile);
-      if (!fileCheck.isFile())
-        printErrorExit("Specified config file does not exist: " + configFile);
-    } else {
-      File fileCheck = new File(configFile);
-      if (!fileCheck.isFile())
-        printErrorExit("Default config file does not exist: " + configFile);
+      configDir = cmd.getOptionValue("c");
     }
+    
+    setConfigDir(configDir);
+
+    File fileCheck = new File(configFile);
+    if (!fileCheck.isFile())
+      System.err.println("Config file does not exist: " + configFile);
 
     Client client = new Client();
-    client.config(configFile);
+    client.Config(configFile);
     client.start();
   }
 
-  
-  // Public static functions for everyone!
-
-
-  /**
-   * Read a file into a string
-   * @param aFile
-   * @return
-   */
-  static public String getContents(File aFile) {
-    //...checks on aFile are elided
-    StringBuilder contents = new StringBuilder();
-
-    try {
-      //use buffering, reading one line at a time
-      //FileReader always assumes default encoding is OK!
-      BufferedReader input =  new BufferedReader(new FileReader(aFile));
-      try {
-        String line = null; //not declared within while loop
-        /*
-        * readLine is a bit quirky :
-        * it returns the content of a line MINUS the newline.
-        * it returns null only for the END of the stream.
-        * it returns an empty String if two newlines appear in a row.
-        */
-        while (( line = input.readLine()) != null){
-          contents.append(line);
-          contents.append(System.getProperty("line.separator"));
-        }
-      }
-      finally {
-        input.close();
-      }
-    }
-    catch (IOException ex){
-      // do something
-    }
-
-    return contents.toString();
-  }
-
-
-  /**
-   * Transfer a public key file to a remote machine.
-   * @param host, where the remote file is to go
-   * @param serverPOSIXaccount, account on remote system
-   * @param password, raw version of the password on the remote accout
-   * @param pubkeyfilename, the local filename of the public key
-   * @return
-   */
-  public static SysResult transferPublicKey(String host, String serverPOSIXaccount, String password, String pubkeyfilename) {
-
-    File pubkeyfile = new File(pubkeyfilename); // TODO: check that the file exists or is not expty
-    String pubkey = Client.getContents(pubkeyfile).trim();
-
-    // TODO: make sure .ssh directory exists on server. mkdir -m 700 .ssh
-
-    // note that the password does not have to be encrypted because SSH should be doing that itself
-
-    SysResult result = Client.runSshCommand(host, serverPOSIXaccount, password, "echo \""+ pubkey +"\" >> ~/.ssh/authorized_keys");
-    return result;
-  }
-
-  public static SysResult keyGen() {
-    String sshDir = System.getProperty("user.home") + "/.ssh";
-    //CommCommon.syscommand("mkdir -p "+sshDir);
-    //CommCommon.syscommand("chmod 700 "+sshDir);
-
-    return keyGen(sshDir + "/mybox_rsa");
-  }
-
-  /**
-   * Create a public/private keypair with a given path/basename
-   * @param filename
-   * @return a SysResult where output is the input filename
-   */
-  public static SysResult keyGen(String filename) {
-
-    SysResult result = new SysResult();
-
-    Common.syscommand(new String[]{"rm", "-f", filename + ".pub"}); // pseudo non-deterministic ubuntu hack
-    Common.syscommand(new String[]{"ssh-add","-l"}); // this is stupid
-
-    // generating with the below method gives "Agent admitted failure to sign using the key." when logging in
-
-    int type=KeyPair.RSA;
-    String comment="generated by mybox";
-    String passphrase="";
-
-    result.output = filename;
-
-    JSch jsch=new JSch();
-
-    try{
-//      KeyPair kpair=KeyPair.genKeyPair(jsch, type);
-      KeyPair kpair=KeyPair.genKeyPair(jsch, type, 2048);
-      kpair.setPassphrase(passphrase);
-      kpair.writePrivateKey(filename);
-      kpair.writePublicKey(filename + ".pub", comment);
-      //System.out.println(kpair.getPublicKeyBlob().toString());
-      //System.out.println("Finger print: "+kpair.getFingerPrint());
-      kpair.dispose();
-      result.worked = true;
-
-      Common.syscommand(new String[]{"chmod", "600", filename});
-    }
-    catch(Exception e){
-      System.err.println("keygen: " + e);
-      result.worked = false;
-    }
-
-    return result;
-  }
-
-  public static boolean setKnownHosts(String host) {
-    try {
-      JSch jsch=new JSch();
-
-      // use bogus account because we dont want to log into the server with a real account.
-      // we only want to generate the local known_hosts file
-      String serverPOSIXaccount = "bogus";
-      String password = "bogus";
-
-      System.out.println("setting known hosts file");
-
-      // TODO: add mkdir .ssh and touch known_hosts for OS X
-      // also chmod 600 .ssh/mybox_rsa
-
-      Session session=jsch.getSession(serverPOSIXaccount, host, 22);
-
-      java.util.Properties config = new java.util.Properties();
-      config.setProperty("StrictHostKeyChecking", "no");
-      session.setConfig(config);
-
-      UserInfo ui=new SshUserInfo();
-      session.setUserInfo(ui);
-      session.setPassword(password);
-
-      session.setConfig("HashKnownHosts",  "yes");
-
-      jsch.setKnownHosts(System.getProperty("user.home") + "/.ssh/known_hosts");
-
-      session.connect();
-
-      // TODO: get return values from SshUserInfo for wrong passwords etc.
-      // System.out.println("Connect returned "+returned);
-
-      session.disconnect();
-
-      System.out.println("known hosts set");
-    }
-    catch(Exception e) {
-      System.out.println(e);
-      return false;
-    }
-    return true;
-  }
-
-  /**
-   * Run remote command over SSH using the JSch library
-   *
-   * @param host
-   * @param serverPOSIXaccount
-   * @param passwordOrIdentFile
-   * @param command
-   * @return
-   */
-  public static SysResult runSshCommand(String host, String serverPOSIXaccount,
-          String passwordOrIdentFile, String command) {
-
-    SysResult result = new SysResult();
-    try{
-      JSch jsch=new JSch();
-
-      System.out.println("sshCommand "+ serverPOSIXaccount + ":" + passwordOrIdentFile + "@" + host + " "+ command);
-
-      Session session=jsch.getSession(serverPOSIXaccount, host, 22);
-
-      UserInfo ui=new SshUserInfo();
-      session.setUserInfo(ui);
-      
-      File identfile = new File(passwordOrIdentFile);
-      
-      if (identfile.exists()) // if it is a private key file, use it
-        jsch.addIdentity(passwordOrIdentFile);
-      else  // else treat the string as a password
-        session.setPassword(passwordOrIdentFile);
-      
-      jsch.setKnownHosts(System.getProperty("user.home") + "/.ssh/known_hosts");
-      session.connect();
-
-      Channel channel=session.openChannel("exec");
-      ((ChannelExec)channel).setCommand(command);
-
-      //channel.setInputStream(System.in);
-      channel.setInputStream(null);
-
-      //channel.setOutputStream(System.out);
-
-      //FileOutputStream fos=new FileOutputStream("/tmp/stderr");
-      //((ChannelExec)channel).setErrStream(fos);
-      ((ChannelExec)channel).setErrStream(System.err);
-
-      InputStream in=channel.getInputStream();
-
-      channel.connect();
-
-      byte[] tmp=new byte[1024];
-      while(true){
-        while(in.available()>0){
-          int i=in.read(tmp, 0, 1024);
-          if(i<0)break;
-          result.output += new String(tmp, 0, i);
-        }
-        if(channel.isClosed()){
-          result.returnCode = channel.getExitStatus();
-          break;
-        }
-        try{Thread.sleep(1000);}catch(Exception ee){}
-      }
-
-      result.worked = true;
-      result.output = result.output.trim();
-      channel.disconnect();
-      session.disconnect();
-    }
-    catch(Exception e){
-      result.worked = false;
-      System.out.println(e);
-    }
-    return result;
-  }
-
-
-  /**
-   * Class needed for SSH authentication via Jsch
-   */
-  public static class SshUserInfo implements UserInfo {
-    public String getPassword(){ return null; }
-    public boolean promptYesNo(String message){
-
-      printMessage("Prompt yes/no: " + message); // perhaps printWarning
-      //Client.quitError("Prompt yes/no: " + message);
-
-      return false; // implies NO
-    }
-
-    public String getPassphrase(){ return null; }
-    public boolean promptPassphrase(String message){ return true; }
-    public boolean promptPassword(String message){
-//      Client.quitError("ssh password prompt failure: " + message);
-      printMessage("ssh password prompt failure: " + message);
-      return false; // implies error?
-    }
-    public void showMessage(String message){
-      printMessage("ssh show message: " + message);
-    }
-
-  }
 
 }

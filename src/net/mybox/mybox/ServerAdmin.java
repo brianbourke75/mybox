@@ -22,30 +22,34 @@
 package net.mybox.mybox;
 
 import java.io.*;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 import org.apache.commons.cli.*;
+
+import org.apache.commons.io.FileUtils;
 
 /**
  * Command line server administative program
  */
 public class ServerAdmin {
 
-  private ServerDB serverDb = null;
+  private AccountsDB accountsDb = null;
 
 
   /**
-   * Delete POSIX account and update user database
+   * Delete account and update user database
    */
   private void deleteAccount(){
 
     BufferedReader br = new BufferedReader(new InputStreamReader(System.in));
-    serverDb.showAccounts();
+    accountsDb.showAccounts();
 
     Server.printMessage_("Which account would you like to delete?\naccount number> ");
 
     String input = null;
     try { input = br.readLine(); } catch (Exception e) {}
 
-    ServerDB.Account thisAccount = serverDb.getAccountByID(input);
+    AccountsDB.Account thisAccount = accountsDb.getAccountByID(input);
 
     if (thisAccount == null) {
       System.out.println("account " + input + " does not exist.");
@@ -58,28 +62,27 @@ public class ServerAdmin {
     try { input = br.readLine(); } catch (Exception e) {}
 
     if (input.equals("y")) {
+
+      // delete the data directory
+      File userDir = new File(Server.GetAbsoluteDataDirectory(thisAccount));
       
-      // delete the POSIX account
-
-      String serverPOSIXaccount = Server.getServerPOSIXaccountName(thisAccount.id);
-
-      System.out.println("deleting POSIX system account");
-      SysResult result = Common.syscommand(new String[]{"sudo", "userdel", "-r", serverPOSIXaccount});
-      System.out.println("delete account " + result);
-
+      try {
+        FileUtils.deleteDirectory(userDir);
+      } catch (IOException ex) {
+        Server.printWarning("There was a problem deleting the user directory " + ex.getMessage());
+      }
+      
       // update the database
-      if (!result.worked)
-        System.out.println("Unable to delete POSIX account");
-      else if(serverDb.deleteAccount(thisAccount.id))
+      if(accountsDb.deleteAccount(thisAccount.id)) 
         System.out.println("Account deleted");
       else
-        System.out.println("Unable to delete account");
+        System.out.println("Unable to delete account from database");
     }
 
   }
 
   /**
-   * Add POSIX account and update database
+   * Add account and update database
    */
   private void addAccount() {
 
@@ -99,62 +102,82 @@ public class ServerAdmin {
     
 
     // validate the entered fields
-    String id = serverDb.getNewID();
+    //String id = accountsDb.getNewID();
     
-    if (!serverDb.validateNewAccount(id, email, password)){
+    if (!accountsDb.validatePotentialAccount(email, password)){
       Server.printWarning("New account is invalid or conflicts with an existing one.");
       return;
     }
     
-    // create the POSIX account
-    
-    String serverPOSIXaccount = Server.getServerPOSIXaccountName(id);
-
-    String cryptedUnixPass = UnixCrypt.crypt(password);
-    
-    System.out.println("creating POSIX system account");
-    SysResult result = Common.syscommand(new String[]{"sudo", "useradd", "-m", "-p", cryptedUnixPass, serverPOSIXaccount});
-    System.out.println("add account " + result);
 
     // update the database
+    String salt = null, encryptedPassword = null;
 
-    if (!result.worked) 
-      Server.printWarning("There was a problem when creating the POSIX account");
-    else {
-
-      String salt = null, encryptedPassword = null;
-
-      try{
-        salt = Common.generateSalt();
-        encryptedPassword = Common.encryptPassword(password, salt);
-      } catch (Exception e) {
-        Server.printWarning("Password encryption error " + e.getMessage());
-      }
-
-      serverDb.addAccount(id, email, encryptedPassword, salt);
-      
+    try{
+      salt = Common.generateSalt();
+      encryptedPassword = Common.encryptPassword(password, salt);
+    } catch (Exception e) {
+      Server.printWarning("Password encryption error " + e.getMessage());
     }
+
+    AccountsDB.Account account = accountsDb.addAccount(email, encryptedPassword, salt);
+      
+    if (account == null) {
+      System.out.println("Error: Unable to add account to database");
+      return;
+    }
+    
+    // create the data directory
+    File userDir = new File(Server.GetAbsoluteDataDirectory(account));
+
+    if (userDir.exists())
+      Server.printWarning("Warning: data directory already exists " + userDir);
+    else if (!userDir.mkdir())
+      Server.printWarning("Warning: There was a problem when creating the data directory " + userDir);
+  }
+  
+  
+  private void showEncryptedPassword(){
+
+    BufferedReader br = new BufferedReader(new InputStreamReader(System.in));
+
+    String inputPassword = null, inputSalt = null, encryptedPassword = null;
+
+    Server.printMessage_("Enter a password to encrypt> ");
+    try { inputPassword = br.readLine(); } catch (Exception e) {}
+    
+    Server.printMessage_("Enter salt> ");
+    try { inputSalt = br.readLine(); } catch (Exception e) {}
+    
+    try {
+      encryptedPassword = Common.encryptPassword(inputPassword, inputSalt);
+    } catch (Exception e) {}
+
+    Server.printMessage("Encrypted password: " + encryptedPassword);
+
   }
 
   /**
    * Constructor. Main loop and menu items.
    * @param dbFile
    */
-  public ServerAdmin(String dbFile) {
+  public ServerAdmin(String configFile) {
 
-    serverDb = new ServerDB(dbFile);
+    Server.LoadConfig(configFile);
+
+    accountsDb = new AccountsDB(Server.accountsDbfile);
 
     BufferedReader br = new BufferedReader(new InputStreamReader(System.in));
     
     Server.printMessage("Starting ServerAdmin command line utility...");
     
-    char choice=0;
-    String input=null;
+    char choice = 0;
+    String input = null;
     
     // menu
     while (choice != 'q') {
       Server.printMessage("  l) List accounts");
-//      Server.printMessage("  c) Check POSIX accounts");
+      //Server.printMessage("  p) Show encyrpted password");
       Server.printMessage("  a) Add account");
       Server.printMessage("  d) Delete account");
       Server.printMessage("  q) Quit");
@@ -173,7 +196,7 @@ public class ServerAdmin {
 
       switch (choice) {
         case 'l':
-          serverDb.showAccounts();
+          accountsDb.showAccounts();
           break;
         case 'd':
           deleteAccount();
@@ -181,9 +204,12 @@ public class ServerAdmin {
         case 'a':
           addAccount();
           break;
-
+        case 'p':
+          showEncryptedPassword();
+          break;
       }
     }
+    //dbConnection.close();
 
   }
 
@@ -194,7 +220,8 @@ public class ServerAdmin {
   public static void main(String[] args) {
 
     Options options = new Options();
-    options.addOption("d", "database", true, "database file");
+    options.addOption("c", "config", true, "configuration file");
+//    options.addOption("d", "database", true, "accounts database file");
     options.addOption("a", "apphome", true, "application home directory");
     options.addOption("h", "help", false, "show help screen");
     options.addOption("V", "version", false, "print the Mybox version");
@@ -235,20 +262,26 @@ public class ServerAdmin {
       Server.updatePaths();
     }
 
-    String dbFile = Server.defaultDbFile;
+    String configFile = Server.defaultConfigFile;
+//    String accountsDBfile = Server.defaultAccountsDbFile;
 
-    if (cmd.hasOption("d")){
-      dbFile = cmd.getOptionValue("d");
-      File fileCheck = new File(dbFile);
-      if (!fileCheck.isFile())
-        Server.printErrorExit("Specified database file does not exist: " + dbFile);
-    } else {
-      File fileCheck = new File(dbFile);
-      if (!fileCheck.isFile())
-        Server.printErrorExit("Default database file does not exist: " + dbFile);
+    if (cmd.hasOption("c")) {
+      configFile = cmd.getOptionValue("c");
     }
+    
+    File fileCheck = new File(configFile);
+    if (!fileCheck.isFile())
+      Server.printErrorExit("Config not found: " + configFile + "\nPlease run ServerSetup");
 
-    ServerAdmin server = new ServerAdmin(dbFile);
+//    if (cmd.hasOption("d")){
+//      accountsDBfile = cmd.getOptionValue("d");
+//    }
+//
+//    fileCheck = new File(accountsDBfile);
+//    if (!fileCheck.isFile())
+//      Server.printErrorExit("Error account database not found: " + accountsDBfile);
+
+    ServerAdmin server = new ServerAdmin(configFile);
 
   }
 

@@ -39,7 +39,8 @@ public class ClientGUI extends java.awt.Frame {
   private static Image icon_ready = createImage("box_green.png", "icon");
   private static Image icon_error = createImage("box_red.png", "icon");
   private static Image icon_disconnected = createImage("box_blank.png", "icon");
-  
+
+  private static boolean debugMode = false;
 
   static MenuItem pauseItem = new MenuItem("Pause Syncing");
   static MenuItem syncnowItem = new MenuItem("Sync Now");
@@ -70,12 +71,16 @@ public class ClientGUI extends java.awt.Frame {
     jTabbedPrefs.setSelectedIndex(1); // show the messages first
 
     client = new Client();
-    client.config(configFile);
+    client.Config(configFile);
     client.clientGui = this;
 
-//    client.start();
 
     placeTrayIconAWT();
+
+    if (!debugMode)
+      client.start();
+
+    this.setVisible(debugMode);
   }
 
   public void printMessage(String message) {
@@ -88,7 +93,7 @@ public class ClientGUI extends java.awt.Frame {
 
   public static void printErrorExit(String message) {
 
-	  System.err.println("clientawt error: " + message);// temp hack
+    System.err.println("clientawt error: " + message);// temp hack
 
     // TODO: fix this so the dialog pops up
     Dialog dialog = new Dialog((ClientGUI)client.clientGui, message);
@@ -109,7 +114,7 @@ public class ClientGUI extends java.awt.Frame {
       trayIcon.setImage(icon_ready);
       
       if (!pauseItem.isEnabled())
-    	  pauseItem.setEnabled(true);
+        pauseItem.setEnabled(true);
       
       if (!syncnowItem.isEnabled())
         syncnowItem.setEnabled(true);
@@ -129,20 +134,19 @@ public class ClientGUI extends java.awt.Frame {
         syncnowItem.setEnabled(false);
     }
     else {//DISCONNECTED
-    	trayIcon.setImage(icon_disconnected);
+      trayIcon.setImage(icon_disconnected);
 
       valueUser.setText("");
       valueServer.setText("");
       valuePort.setText("");
 
       if (pauseItem.isEnabled())
-      	pauseItem.setEnabled(false);
+        pauseItem.setEnabled(false);
 
       if (syncnowItem.isEnabled())
         syncnowItem.setEnabled(false);
 
       connectionItem.setLabel("Connect");
-    	
     }
   }
 
@@ -250,7 +254,7 @@ public class ClientGUI extends java.awt.Frame {
 
     syncnowItem.addActionListener(new ActionListener() {
       public void actionPerformed(ActionEvent e) {
-        client.sync();
+        client.FullSync();
       }
     });
 
@@ -427,41 +431,48 @@ public class ClientGUI extends java.awt.Frame {
       //System.exit(0);
     }//GEN-LAST:event_buttonCloseActionPerformed
 
-    static String configFile = null;
+    //static String configFile = null;
 
     /**
     * @param args the command line arguments
     */
     public static void main(String args[]) {
-    	
+
       Options options = new Options();
-      options.addOption("c", "config", true, "configuration file");
+      options.addOption("c", "config", true, "configuration directory (default=~/.mybox)");
       options.addOption("a", "apphome", true, "application home directory");
+      options.addOption("d", "debug", false, "enable debug mode");
       options.addOption("h", "help", false, "show help screen");
       options.addOption("V", "version", false, "print the Mybox version");
 
       CommandLineParser line = new GnuParser();
       CommandLine cmd = null;
 
+      String configDir = Client.defaultConfigDir;
+
       try {
         cmd = line.parse(options, args);
       } catch( Exception exp ) {
         System.err.println( exp.getMessage() );
         HelpFormatter formatter = new HelpFormatter();
-        formatter.printHelp( "Client", options );
+        formatter.printHelp( ClientGUI.class.getName(), options );
         return;
       }
 
 
       if (cmd.hasOption("h")) {
         HelpFormatter formatter = new HelpFormatter();
-        formatter.printHelp( Client.class.getName(), options );
+        formatter.printHelp( ClientGUI.class.getName(), options );
         return;
       }
 
       if (cmd.hasOption("V")) {
         Client.printMessage("version " + Common.appVersion);
         return;
+      }
+
+      if (cmd.hasOption("d")) {
+        debugMode = true;
       }
 
       if (cmd.hasOption("a")) {
@@ -475,24 +486,16 @@ public class ClientGUI extends java.awt.Frame {
         Client.updatePaths();
       }
 
-      configFile = Client.defaultConfigFile;
-
-
       if (cmd.hasOption("c")) {
-        configFile = cmd.getOptionValue("c");
-        File fileCheck = new File(configFile);
-        if (!fileCheck.isFile())
-          printErrorExit("Specified config file does not exist: " + configFile);
-      } else {
-        File fileCheck = new File(configFile);
-        if (!fileCheck.isFile())
-          printErrorExit("Default config file does not exist: " + configFile);
+        configDir = cmd.getOptionValue("c");
       }
 
-        
+      Client.setConfigDir(configDir);
+
+      
       java.awt.EventQueue.invokeLater(new Runnable() {
         public void run() {
-          new ClientGUI(configFile).setVisible(true);
+          new ClientGUI(Client.configFile);
         }
       });
     }

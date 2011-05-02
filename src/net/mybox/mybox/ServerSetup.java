@@ -35,6 +35,8 @@ public class ServerSetup {
   private int maxClients = Server.maxClients;
 
   private String configFile = Server.defaultConfigFile;
+  private String baseDataDir = Server.defaultBaseDataDir;
+  private String accountsDbFile = Server.defaultAccountsDbFile;
   
   /**
    * Get the initial input from the user
@@ -45,43 +47,33 @@ public class ServerSetup {
 
     String input = null;
     
-    Client.printMessage_("Port ["+port+"]: ");
-    
+    Server.printMessage_("Port ["+port+"]: ");
     try {   input = br.readLine();   }    catch (Exception e) {   }
     if (!input.isEmpty())  
-      port = Integer.parseInt(input); // catch
+      port = Integer.parseInt(input); // TODO: catch
 
-    Client.printMessage_("Quota in megabytes ["+defaultQuota+"]: ");
-
-    try {   input = br.readLine();   }    catch (Exception e) {   }
-
-    if (!input.isEmpty())
-      defaultQuota = Integer.parseInt(input);  //catch
-
-    Client.printMessage_("Config file ["+configFile+"]: ");
-
+    Server.printMessage_("Per-account quota in megabytes ["+defaultQuota+"]: ");
     try {   input = br.readLine();   }    catch (Exception e) {   }
     if (!input.isEmpty())
-      configFile = input; //catch
+      defaultQuota = Integer.parseInt(input);  // TODO: catch
+
+    Server.printMessage_("Base data directory to create/use ["+baseDataDir+"]: ");
+    try {   input = br.readLine();   }    catch (Exception e) {   }
+    if (!input.isEmpty())
+      baseDataDir = input;
+
+    Server.printMessage_("Accounts database file to create/use ["+accountsDbFile+"]: ");
+    try {   input = br.readLine();   }    catch (Exception e) {   }
+    if (!input.isEmpty())
+      accountsDbFile = input;
+    
+    Server.printMessage_("Config file to create ["+configFile+"]: ");
+    try {   input = br.readLine();   }    catch (Exception e) {   }
+    if (!input.isEmpty())
+      configFile = input;
+
   }
 
-  private boolean setupDirectories() {
-
-    // add .ssh to /etc/skel
-
-    File sshdir = new File("/etc/skel/.ssh");
-
-    if (!sshdir.exists())
-      if (!sshdir.mkdir())
-        return false;
-
-    // make sure the permissions are correct
-    SysResult result = Common.syscommand(new String[]{"sudo", "chmod", "0700", sshdir.getAbsolutePath()});
-    if (!result.worked)
-      return false;
-
-    return true;
-  }
 
   /**
    * Save the configuration file to the filesystem
@@ -95,43 +87,17 @@ public class ServerSetup {
     config.setProperty("port", Integer.toString(port));
     config.setProperty("maxClients", Integer.toString(maxClients));
     config.setProperty("defaultQuota", Integer.toString(defaultQuota));
+    config.setProperty("baseDataDir", baseDataDir);
+    config.setProperty("accountsDbFile", accountsDbFile);
 
     try {
       FileOutputStream MyOutputStream = new FileOutputStream(configFile);
       config.store(MyOutputStream, "Mybox server configuration file");
     } catch (Exception e) {
-      Server.printErrorExit(e.getMessage());
-    }
-
-    return true;
-  }
-
-  /**
-   * Check various files and their permissions
-   * @return true if the check passed
-   */
-  private boolean checkFiles() {
-
-    // check for the unison command and make sure it can be executed
-
-    File unisonCommand = new File(Server.serverUnisonCommand);
-
-    if (!unisonCommand.exists())
-      return false;
-
-    if (!unisonCommand.canExecute())
-      unisonCommand.setExecutable(true);
-
-    return true;
-  }
-
-  private boolean createNewDB() {
-
-    try {
-      ServerDB.createNewDB();
-    } catch (IOException e) {
+      Server.printWarning(e.getMessage());
       return false;
     }
+
     return true;
   }
 
@@ -140,22 +106,29 @@ public class ServerSetup {
    */
   private ServerSetup() {
 
-    Client.printMessage("Welcome to the Mybox server setup wizard");
-    // TODO: make sure they are the superuser
+    Server.printMessage("Welcome to the Mybox server setup wizard");
     
     // TODO: add facility to create a new database
 
     gatherInput();
-
-    if (!checkFiles())
-      Server.printErrorExit("Unable to setup needed files.");
     
-    if (!setupDirectories())
-      Server.printErrorExit("Unable to setup directories. Make sure you run as super user.");
+    if (!Common.MakeDir(baseDataDir))
+      Server.printErrorExit("Unable to setup directories.");
     
-    saveConfig();
+    if (!AccountsDB.Setup(accountsDbFile))
+      Server.printErrorExit("Unable to setup database.");
 
-    createNewDB();
+    if (!saveConfig())
+      Server.printErrorExit("Unable to save config file.");
+
+    AccountsDB accountsDB = new AccountsDB(accountsDbFile);
+    int accounts = accountsDB.AccountsCount();
+    System.out.println("You database contains " + accounts + " accounts");
+
+    System.out.println("Setup finished successfully.");
+
+    if (accounts == 0)
+      System.out.println("You will not be able to to use Mybox unless accounts are created.");
   }
 
 
@@ -178,18 +151,18 @@ public class ServerSetup {
     } catch( Exception exp ) {
       System.err.println( exp.getMessage() );
       HelpFormatter formatter = new HelpFormatter();
-      formatter.printHelp( Client.class.getName(), options );
+      formatter.printHelp( Server.class.getName(), options );
       return;
     }
 
     if (cmd.hasOption("h")) {
       HelpFormatter formatter = new HelpFormatter();
-      formatter.printHelp( Client.class.getName(), options );
+      formatter.printHelp( Server.class.getName(), options );
       return;
     }
 
     if (cmd.hasOption("V")) {
-      Client.printMessage("version " + Common.appVersion);
+      Server.printMessage("version " + Common.appVersion);
       return;
     }
 
@@ -198,7 +171,7 @@ public class ServerSetup {
       try {
         Common.updatePaths(appHomeDir);
       } catch (FileNotFoundException e) {
-        Client.printErrorExit(e.getMessage());
+        Server.printErrorExit(e.getMessage());
       }
 
       Server.updatePaths();
