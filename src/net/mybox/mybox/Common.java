@@ -77,7 +77,7 @@ public class Common {
   }
 
   public static int defaultCommunicationPort = 4444;
-  public static final String appVersion = "0.1.0";
+  public static final String appVersion = "0.2.0";
 
   // determine running application directories are
   private static String incDir = null;
